@@ -173,4 +173,4 @@ No PII is stored. Sessions are tracked as one-way SHA-256 hashes.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Replace `Karan Singh Mertiya` in the license file.
+MIT © Karan Singh Mertiya — see [LICENSE](LICENSE).
