@@ -28,12 +28,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /fonts
 
 # Source Serif 4 — variable fonts from adobe-fonts/source-serif (official upstream)
-# Variable TTF covers all weights (200-900) + optical sizes in one file each
+# Confirmed paths: /VAR/SourceSerif4Variable-Roman.ttf and Italic variant
 RUN curl -fsSL -o SourceSerif4.ttf \
-    "https://github.com/adobe-fonts/source-serif/raw/release/Variable/TTF/SourceSerif4%5Bopsz%2Cwght%5D.ttf"
+    "https://github.com/adobe-fonts/source-serif/raw/release/VAR/SourceSerif4Variable-Roman.ttf"
 
 RUN curl -fsSL -o SourceSerif4-Italic.ttf \
-    "https://github.com/adobe-fonts/source-serif/raw/release/Variable/TTF/SourceSerif4-Italic%5Bopsz%2Cwght%5D.ttf"
+    "https://github.com/adobe-fonts/source-serif/raw/release/VAR/SourceSerif4Variable-Italic.ttf"
 
 # JetBrains Mono
 RUN curl -fsSL -o JetBrainsMono-Regular.ttf \
