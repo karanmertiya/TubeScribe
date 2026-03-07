@@ -27,12 +27,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 
 WORKDIR /fonts
 
-# Source Serif 4 — variable font (covers all weights + italics in one file)
+# Source Serif 4 — variable fonts from adobe-fonts/source-serif (official upstream)
+# Variable TTF covers all weights (200-900) + optical sizes in one file each
 RUN curl -fsSL -o SourceSerif4.ttf \
-    "https://github.com/google/fonts/raw/main/ofl/sourceserif4/SourceSerif4%5Bopsz%2Cwght%5D.ttf"
+    "https://github.com/adobe-fonts/source-serif/raw/release/Variable/TTF/SourceSerif4%5Bopsz%2Cwght%5D.ttf"
 
 RUN curl -fsSL -o SourceSerif4-Italic.ttf \
-    "https://github.com/google/fonts/raw/main/ofl/sourceserif4/SourceSerif4Italic%5Bopsz%2Cwght%5D.ttf"
+    "https://github.com/adobe-fonts/source-serif/raw/release/Variable/TTF/SourceSerif4-Italic%5Bopsz%2Cwght%5D.ttf"
 
 # JetBrains Mono
 RUN curl -fsSL -o JetBrainsMono-Regular.ttf \
@@ -98,6 +99,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 
 CMD ["uvicorn", "main:app", \
      "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--access-log", \
+     "--log-level", "info"]
      "--port", "8000", \
      "--workers", "1", \
      "--access-log", \
