@@ -7,7 +7,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Live demo →** https://your-app.railway.app
+**Live demo →** [https://your-app.railway.app](https://tubescribe-production.up.railway.app/)
 
 ---
 
