@@ -1,0 +1,39 @@
+# Secrets — never bake into image
+.env
+*.env
+
+# Python noise
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Local data
+*.db
+/data/
+
+# Dev tooling
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# VCS
+.git/
+.gitignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Docs (not needed in image)
+README.md
+LICENSE

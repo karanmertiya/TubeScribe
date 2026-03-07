@@ -1,0 +1,269 @@
+"""
+TubeScribe — v3
+FastAPI entry point.  Routes only — all logic lives in backend/.
+
+Run locally:
+  uvicorn main:app --reload --port 8000
+
+Deploy:
+  Railway / Render / Fly.io — point to this file.
+  Set env vars from .env.example in the platform dashboard.
+"""
+from __future__ import annotations
+import datetime
+import logging
+import os
+import re
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import Response as RawResponse
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+
+from backend import analytics
+from backend.auth import ADMIN_PASSWORD, is_dev, make_token, verify_token
+from backend.llm import DEFAULT_SYSTEM_PROMPT, LLMConfig
+from backend.pdf import to_pdf
+from backend.pipeline import run_playlist, run_single_stream
+from backend.telegram import handle_update, send_document
+from fastapi.responses import StreamingResponse
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+app = FastAPI(
+    title="TubeScribe",
+    description="AI-powered YouTube → PDF notes — delivered to Telegram or browser download.",
+    version="3.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+async def frontend():
+    path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="text/html")
+    return JSONResponse({"msg": "Frontend not found. API docs at /docs"})
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/auth/login", tags=["Auth"])
+async def login(request: Request, response: Response):
+    """Dev login. POST {"password": "…"}."""
+    import hmac
+    body = await request.json()
+    pw   = body.get("password", "")
+    if not ADMIN_PASSWORD:
+        return JSONResponse({"error": "Admin password not configured."}, status_code=503)
+    if not hmac.compare_digest(pw, ADMIN_PASSWORD):
+        return JSONResponse({"error": "Invalid password."}, status_code=401)
+    token = make_token()
+    response.set_cookie(
+        key="session", value=token,
+        httponly=True, secure=os.getenv("HTTPS", "false").lower() == "true",
+        samesite="lax", max_age=86400 * 7,
+    )
+    return {"mode": "developer", "ok": True}
+
+
+@app.post("/auth/logout", tags=["Auth"])
+async def logout(response: Response):
+    response.delete_cookie("session")
+    return {"ok": True}
+
+
+@app.get("/auth/me", tags=["Auth"])
+async def me(request: Request):
+    dev = is_dev(request)
+    from backend.llm.config import (DEFAULT_GEMINI_MODEL, DEFAULT_GROQ_MODEL,
+                                    DEFAULT_PROVIDER, SERVER_GEMINI_KEY, SERVER_GROQ_KEY)
+    return {
+        "mode":           "developer" if dev else "user",
+        "tg_configured":  bool(os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID")),
+        "llm_provider":   DEFAULT_PROVIDER,
+        "llm_model":      DEFAULT_GEMINI_MODEL if DEFAULT_PROVIDER == "gemini" else DEFAULT_GROQ_MODEL,
+        "gemini_ready":   bool(SERVER_GEMINI_KEY),
+        "groq_ready":     bool(SERVER_GROQ_KEY),
+    }
+
+
+# ── System ────────────────────────────────────────────────────────────────────
+
+@app.get("/health", tags=["System"])
+def health():
+    from backend.llm.config import DEFAULT_PROVIDER, SERVER_GEMINI_KEY, SERVER_GROQ_KEY
+    return {
+        "status":         "ok",
+        "version":        "3.0.0",
+        "llm_provider":   DEFAULT_PROVIDER,
+        "gemini_ready":   bool(SERVER_GEMINI_KEY),
+        "groq_ready":     bool(SERVER_GROQ_KEY),
+        "telegram_ready": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+    }
+
+
+@app.get("/stats", tags=["System"])
+def stats():
+    """Public stats — safe to embed in README badge."""
+    return analytics.summary()
+
+
+@app.get("/default-prompt", tags=["Utilities"])
+def default_prompt():
+    return {"prompt": DEFAULT_SYSTEM_PROMPT}
+
+
+# ── Pipeline ──────────────────────────────────────────────────────────────────
+
+def _resolve_llm(body: dict, dev: bool) -> LLMConfig | tuple:
+    """Build LLMConfig from request body. Returns (None, error_response) on failure."""
+    if dev:
+        llm = LLMConfig(system_prompt=body.get("system_prompt"))
+    else:
+        llm = LLMConfig(
+            provider=body.get("llm_provider"),
+            model=body.get("llm_model"),
+            api_key=body.get("api_key"),
+            system_prompt=body.get("system_prompt"),
+        )
+        if err := llm.validate():
+            return None, JSONResponse({"error": err}, status_code=400)
+    return llm, None
+
+
+@app.post("/process-playlist", tags=["Pipeline"])
+async def process_playlist(request: Request):
+    """
+    Full playlist pipeline. Real-time SSE progress stream.
+
+    **Dev mode** (session cookie): server keys, merged PDF → owner Telegram.
+
+    **User mode**: supply `api_key`. On completion the `done` SSE event carries
+    `pdf_b64` (base64-encoded PDF) — the frontend triggers a browser download directly.
+    No server storage, no expiring links.
+
+    ```json
+    {
+      "url":           "https://youtube.com/playlist?list=…",
+      "llm_provider":  "gemini",
+      "llm_model":     "gemini-2.5-flash",
+      "api_key":       "…",
+      "system_prompt": "…"
+    }
+    ```
+    """
+    body = await request.json()
+    url  = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "url is required"}, status_code=400)
+
+    dev = is_dev(request)
+    llm, err = _resolve_llm(body, dev)
+    if err:
+        return err
+
+    session = request.cookies.get("session", "")
+    return StreamingResponse(
+        run_playlist(url, llm, dev, session),
+        media_type="text/event-stream",
+    )
+
+
+@app.post("/stream-notes", tags=["Pipeline"])
+async def stream_notes(request: Request):
+    """Single-video SSE stream — returns markdown chunks in real-time."""
+    body = await request.json()
+    url  = (body.get("url") or "").strip()
+    if not url:
+        return JSONResponse({"error": "url is required"}, status_code=400)
+
+    dev = is_dev(request)
+    llm, err = _resolve_llm(body, dev)
+    if err:
+        return err
+
+    session = request.cookies.get("session", "")
+    return StreamingResponse(
+        run_single_stream(url, llm, dev, session),
+        media_type="text/event-stream",
+    )
+
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+
+@app.post("/markdown-to-pdf", tags=["Utilities"])
+async def markdown_to_pdf(request: Request):
+    """
+    Convert Markdown → styled PDF.
+
+    - **Dev mode**: auto-sends to owner Telegram + returns file.
+    - **User mode**: returns file. If `tg_token` + `tg_chat` are set,
+      sends a download link to user's Telegram as well.
+    """
+    body  = await request.json()
+    title = (body.get("title") or "Notes").strip()
+    md    = (body.get("markdown") or "").strip()
+    if not md:
+        return JSONResponse({"error": "markdown field is required"}, status_code=400)
+
+    dev = is_dev(request)
+
+    try:
+        pdf_bytes = to_pdf(title, md)
+    except Exception as exc:
+        return JSONResponse({"error": f"PDF generation failed: {exc}"}, status_code=500)
+
+    ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"{re.sub(r'[^a-zA-Z0-9_-]', '_', title[:40])}_{ts}.pdf"
+
+    analytics.record("pdf_generated", mode="dev" if dev else "user")
+
+    if dev:
+        send_document(f"📄 {title}", pdf_bytes, filename)
+
+    return RawResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+
+# ── Telegram Webhook (developer's bot only) ───────────────────────────────────
+
+@app.post("/webhook/telegram", include_in_schema=False)
+async def telegram_webhook(request: Request):
+    """
+    Telegram bot webhook. Register once:
+      curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=<BASE_URL>/webhook/telegram"
+
+    Handles /topdf command (developer only).
+    """
+    if not os.getenv("TELEGRAM_BOT_TOKEN"):
+        return JSONResponse({"error": "Telegram not configured."}, status_code=503)
+    try:
+        update = await request.json()
+        await handle_update(update)
+    except Exception as exc:
+        logging.getLogger(__name__).error("Webhook error: %s", exc)
+    return {"ok": True}
