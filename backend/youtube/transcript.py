@@ -65,8 +65,9 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "writeautomaticsub": True,
         "subtitleslangs":    ["en"],
         "subtitlesformat":   "vtt",
+        "skip_download":     True,
         "outtmpl":           base,
-        "format":            "bestaudio/best",  # prevents "format not available" error
+        "format":            "none",  # don't select any video/audio format — subtitles only
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
