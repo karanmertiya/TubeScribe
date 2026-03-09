@@ -1045,7 +1045,7 @@ function go() {
 async function runSingle(url) {
   show('preview-panel');
   let body;
-  try { body = buildBody({ url }, true); }  // playlist requires user API key
+  try { body = buildBody({ url }, false); }  // single video is free — no API key needed
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
 
   try {
