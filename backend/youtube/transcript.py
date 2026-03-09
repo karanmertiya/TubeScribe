@@ -68,25 +68,45 @@ def _get_title(video_id: str, cookies_file: str | None) -> str:
 
 def _fetch_via_worker(worker_url: str, video_id: str) -> list:
     """
-    Fetch transcript by calling the Cloudflare Worker as a fetch API.
-    Worker proxies the YouTube page + timedtext URL, returns raw content.
+    Fetch transcript using YouTube's internal youtubei/v1/player API via Worker.
+    This bypasses the page-scraping approach entirely — no captionTracks regex needed.
+    Uses the Android client which returns full caption data without auth.
     """
-    WORKER = worker_url.rstrip("/") + "?url="
-    yt_page = f"https://www.youtube.com/watch?v={video_id}"
-
-    # Step 1: fetch YouTube page via Worker
-    resp = requests.get(WORKER + requests.utils.quote(yt_page, safe=""), timeout=15)
-    if not resp.ok:
-        raise FileNotFoundError(f"Worker failed to fetch YouTube page: {resp.status_code}")
-    html = resp.text
-
-    # Step 2: extract caption tracks
-    match = re.search(r'"captionTracks":(\[.*?\])', html)
-    if not match:
-        raise FileNotFoundError("No captions found for this video (no captionTracks in page).")
-
     import json
-    tracks = json.loads(match.group(1))
+    WORKER = worker_url.rstrip("/") + "?url="
+
+    # Step 1: POST to youtubei player API via Worker
+    player_api = "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
+    payload = json.dumps({
+        "videoId": video_id,
+        "context": {
+            "client": {
+                "clientName": "ANDROID",
+                "clientVersion": "19.09.37",
+                "androidSdkVersion": 30,
+                "hl": "en",
+                "gl": "US",
+            }
+        }
+    })
+
+    resp = requests.post(
+        WORKER + requests.utils.quote(player_api, safe=""),
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=20,
+    )
+    if not resp.ok:
+        raise FileNotFoundError(f"Worker/player API error: {resp.status_code} {resp.text[:200]}")
+
+    data = resp.json()
+
+    # Step 2: extract captionTracks from player response
+    try:
+        tracks = data["captions"]["playerCaptionsTracklistRenderer"]["captionTracks"]
+    except (KeyError, TypeError):
+        raise FileNotFoundError("No captions available for this video.")
+
     track = (
         next((t for t in tracks if t.get("languageCode") == "en" and not t.get("kind")), None)
         or next((t for t in tracks if t.get("languageCode") == "en"), None)
@@ -97,14 +117,14 @@ def _fetch_via_worker(worker_url: str, video_id: str) -> list:
 
     # Step 3: fetch transcript JSON via Worker
     timedtext_url = track["baseUrl"] + "&fmt=json3"
-    tresp = requests.get(WORKER + requests.utils.quote(timedtext_url, safe=""), timeout=15)
+    tresp = requests.get(
+        WORKER + requests.utils.quote(timedtext_url, safe=""),
+        timeout=15,
+    )
     if not tresp.ok:
-        raise FileNotFoundError(f"Worker failed to fetch transcript: {tresp.status_code}")
+        raise FileNotFoundError(f"Worker failed to fetch timedtext: {tresp.status_code}")
 
-    data   = tresp.json()
-    events = data.get("events", [])
-
-    # Convert to list of dicts like youtube-transcript-api returns
+    events = tresp.json().get("events", [])
     result = []
     for ev in events:
         if not ev.get("segs"):
