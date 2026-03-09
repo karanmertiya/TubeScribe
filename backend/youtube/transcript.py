@@ -1,7 +1,6 @@
 """
 Fetch transcripts via YouTube's timedtext API (youtube-transcript-api).
 yt-dlp is used only to resolve the video title — no format/download involved.
-This completely sidesteps SABR streaming, PO tokens, and bot detection.
 """
 from __future__ import annotations
 import logging
@@ -15,6 +14,8 @@ from youtube_transcript_api._errors import (
     NoTranscriptFound,
     TranscriptsDisabled,
     VideoUnavailable,
+    RequestBlocked,
+    IpBlocked,
 )
 
 log = logging.getLogger("tubescribe.youtube")
@@ -38,22 +39,18 @@ def _cookies_path() -> str | None:
 
 def _video_id(url: str) -> str:
     """Extract YouTube video ID from any URL format."""
-    patterns = [
-        r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})",
-    ]
-    for p in patterns:
-        m = re.search(p, url)
-        if m:
-            return m.group(1)
+    m = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", url)
+    if m:
+        return m.group(1)
     raise ValueError(f"Cannot extract video ID from URL: {url}")
 
 
 def _get_title(video_id: str, cookies_file: str | None) -> str:
     """Use yt-dlp metadata-only fetch to get the video title."""
     opts: dict = {
-        "quiet":          True,
-        "skip_download":  True,
-        "extract_flat":   True,   # metadata only — no format resolution at all
+        "quiet":         True,
+        "skip_download": True,
+        "extract_flat":  True,
     }
     if cookies_file:
         opts["cookiefile"] = cookies_file
@@ -72,36 +69,47 @@ def _get_title(video_id: str, cookies_file: str | None) -> str:
 def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
     """
     Returns (title, clean_transcript).
-    Uses youtube-transcript-api for the transcript (no yt-dlp format issues).
-    Uses yt-dlp extract_flat for the title only.
+    Uses youtube-transcript-api for transcript, yt-dlp for title only.
     """
-    video_id   = _video_id(video_url)
-    cookies    = _cookies_path()
+    video_id    = _video_id(video_url)
+    cookies     = _cookies_path()
     cookies_tmp = cookies if (_COOKIES_TEXT and cookies != _COOKIES_FILE) else None
 
     try:
-        # ── 1. Get title (metadata only, no format selection) ──────────────
         title = _get_title(video_id, cookies)
 
-        # ── 2. Fetch transcript via timedtext API ───────────────────────────
-        log.warning("Fetching transcript for %s via timedtext API", video_id)
+        log.warning("Fetching transcript for video_id=%s", video_id)
+
+        # New API: instantiate the class, then use list_transcripts
+        ytt = YouTubeTranscriptApi()
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            # Prefer manually created English, then auto-generated English
+            transcript_list = ytt.list(video_id)
+            # Prefer manually created English, then auto-generated
             try:
                 transcript = transcript_list.find_manually_created_transcript(["en"])
             except NoTranscriptFound:
                 transcript = transcript_list.find_generated_transcript(["en"])
-            entries = transcript.fetch()
+            fetched = transcript.fetch()
+        except (RequestBlocked, IpBlocked) as exc:
+            raise FileNotFoundError(
+                "YouTube is blocking transcript requests from this server IP. "
+                "This is a YouTube restriction on cloud/datacenter IPs. "
+                f"Details: {exc}"
+            )
         except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable) as exc:
             raise FileNotFoundError(
                 f"No English transcript available for '{title}': {exc}"
             )
 
-        # ── 3. Clean and deduplicate ────────────────────────────────────────
+        # Clean and deduplicate — new API returns FetchedTranscript with .snippets
         seen: dict[str, None] = {}
+        # Handle both old dict format and new FetchedTranscriptSnippet format
+        entries = fetched.snippets if hasattr(fetched, "snippets") else fetched
         for entry in entries:
-            text = entry.get("text", "").strip().replace("\n", " ")
+            if hasattr(entry, "text"):
+                text = entry.text.strip().replace("\n", " ")
+            else:
+                text = entry.get("text", "").strip().replace("\n", " ")
             if text:
                 seen[text] = None
 
