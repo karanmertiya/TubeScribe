@@ -69,8 +69,8 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "subtitlesformat":   "vtt",
         "skip_download":     True,
         "outtmpl":           base,
-        # ios client works reliably on server IPs and respects cookies
-        "extractor_args":    {"youtube": {"player_client": ["ios"]}},
+        # mweb supports cookies AND avoids SABR-only formats on datacenter IPs
+        "extractor_args":    {"youtube": {"player_client": ["mweb"]}},
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
