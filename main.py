@@ -135,15 +135,48 @@ def default_prompt():
 
 # ── Pipeline ──────────────────────────────────────────────────────────────────
 
-def _resolve_llm(body: dict, dev: bool) -> LLMConfig | tuple:
-    """Build LLMConfig from request body. Returns (None, error_response) on failure."""
+def _resolve_llm_single(body: dict, dev: bool) -> tuple:
+    """
+    Single-video: dev mode uses server keys.
+    User mode also uses server keys — single video is free for everyone.
+    User-supplied api_key is accepted if provided (overrides server key).
+    """
     if dev:
         llm = LLMConfig(system_prompt=body.get("system_prompt"))
     else:
+        # User may optionally provide their own key; if not, fall back to server key
         llm = LLMConfig(
             provider=body.get("llm_provider"),
             model=body.get("llm_model"),
-            api_key=body.get("api_key"),
+            api_key=body.get("api_key") or None,  # None → LLMConfig uses server key
+            system_prompt=body.get("system_prompt"),
+        )
+        if err := llm.validate():
+            return None, JSONResponse({"error": err}, status_code=400)
+    return llm, None
+
+
+def _resolve_llm_playlist(body: dict, dev: bool) -> tuple:
+    """
+    Playlist (Preview): dev mode uses server keys.
+    User mode MUST supply their own API key — playlists are expensive and
+    could exhaust server quota, so users bring their own key.
+    """
+    if dev:
+        llm = LLMConfig(system_prompt=body.get("system_prompt"))
+    else:
+        user_key = (body.get("api_key") or "").strip()
+        if not user_key:
+            return None, JSONResponse(
+                {"error": "Playlist generation requires your own API key. "
+                          "Add it in ⚙️ Settings → API Key. "
+                          "Get a free key at console.groq.com or aistudio.google.com/apikey"},
+                status_code=400,
+            )
+        llm = LLMConfig(
+            provider=body.get("llm_provider"),
+            model=body.get("llm_model"),
+            api_key=user_key,
             system_prompt=body.get("system_prompt"),
         )
         if err := llm.validate():
@@ -178,7 +211,7 @@ async def process_playlist(request: Request):
         return JSONResponse({"error": "url is required"}, status_code=400)
 
     dev = is_dev(request)
-    llm, err = _resolve_llm(body, dev)
+    llm, err = _resolve_llm_playlist(body, dev)
     if err:
         return err
 
@@ -198,7 +231,7 @@ async def stream_notes(request: Request):
         return JSONResponse({"error": "url is required"}, status_code=400)
 
     dev = is_dev(request)
-    llm, err = _resolve_llm(body, dev)
+    llm, err = _resolve_llm_single(body, dev)
     if err:
         return err
 
