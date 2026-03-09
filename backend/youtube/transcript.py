@@ -84,19 +84,25 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
 
         log.warning("Fetching transcript for video_id=%s", video_id)
 
-        # Use Tor (socks5://127.0.0.1:9050) if running, else fallback to PROXY_URL env var
-        proxy_url = os.getenv("PROXY_URL")
-        tor_proxy  = "socks5://127.0.0.1:9050"
+        # Route through Cloudflare Worker proxy (not blocked by YouTube)
+        worker_url  = os.getenv("YT_PROXY_WORKER", "").rstrip("/")
+        proxy_url   = os.getenv("PROXY_URL", "")
 
-        # Prefer Tor (started in CMD), fall back to PROXY_URL, fall back to direct
-        effective_proxy = tor_proxy if os.getenv("USE_TOR", "true").lower() != "false" else proxy_url
-
-        if effective_proxy:
-            log.warning("Using proxy for transcript fetch: %s", effective_proxy.split("@")[-1])
+        if worker_url:
+            # Worker acts as an HTTP proxy — pass as http/https proxy
+            log.warning("Using Cloudflare Worker proxy for transcript fetch")
             ytt = YouTubeTranscriptApi(
                 proxy_config=GenericProxyConfig(
-                    http_url=effective_proxy,
-                    https_url=effective_proxy,
+                    http_url=worker_url,
+                    https_url=worker_url,
+                )
+            )
+        elif proxy_url:
+            log.warning("Using PROXY_URL for transcript fetch")
+            ytt = YouTubeTranscriptApi(
+                proxy_config=GenericProxyConfig(
+                    http_url=proxy_url,
+                    https_url=proxy_url,
                 )
             )
         else:
