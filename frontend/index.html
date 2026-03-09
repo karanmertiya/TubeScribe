@@ -1048,28 +1048,33 @@ function extractVideoId(url) {
 }
 
 async function fetchTranscriptInBrowser(videoId) {
-  // Step 1: get the timedtext URL from YouTube's video page
-  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {credentials: 'omit'});
-  const html    = await pageRes.text();
+  // Use a CORS proxy to fetch YouTube page (avoids browser CORS block)
+  const CORS  = 'https://corsproxy.io/?url=';
+  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Extract caption tracks JSON from page source
+  // Step 1: get caption track list from YouTube page
+  const pageRes = await fetch(CORS + encodeURIComponent(ytUrl));
+  if (!pageRes.ok) throw new Error('Could not load YouTube page.');
+  const html = await pageRes.text();
+
   const match = html.match(/"captionTracks":(\[.*?\])/);
   if (!match) throw new Error('No captions found for this video.');
 
   const tracks = JSON.parse(match[1]);
-  // Prefer English manual, then English auto, then first available
-  const track = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
-                tracks.find(t => t.languageCode === 'en') ||
-                tracks[0];
+  const track  = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
+                 tracks.find(t => t.languageCode === 'en') ||
+                 tracks[0];
   if (!track) throw new Error('No English captions found for this video.');
 
-  // Step 2: fetch the actual transcript XML
-  const xmlRes  = await fetch(track.baseUrl + '&fmt=json3', {credentials: 'omit'});
-  const data    = await xmlRes.json();
-  const events  = data.events || [];
+  // Step 2: fetch transcript JSON (baseUrl is a youtube.com URL — also needs CORS proxy)
+  const transcriptUrl = track.baseUrl + '&fmt=json3';
+  const jsonRes = await fetch(CORS + encodeURIComponent(transcriptUrl));
+  if (!jsonRes.ok) throw new Error('Could not load transcript.');
+  const data   = await jsonRes.json();
+  const events = data.events || [];
 
-  // Step 3: extract and clean text
-  const seen = new Set();
+  // Step 3: extract and deduplicate text
+  const seen  = new Set();
   const parts = [];
   for (const ev of events) {
     if (!ev.segs) continue;
