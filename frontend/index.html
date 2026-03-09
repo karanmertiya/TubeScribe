@@ -1048,12 +1048,12 @@ function extractVideoId(url) {
 }
 
 async function fetchTranscriptInBrowser(videoId) {
-  // Use a CORS proxy to fetch YouTube page (avoids browser CORS block)
-  const CORS  = 'https://corsproxy.io/?url=';
-  const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  // Use Cloudflare Worker as proxy (not blocked by YouTube, adds CORS headers)
+  const WORKER = 'https://nameless-king-c5b2.aspirantjee2392.workers.dev/?url=';
+  const ytUrl  = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Step 1: get caption track list from YouTube page
-  const pageRes = await fetch(CORS + encodeURIComponent(ytUrl));
+  // Step 1: get caption track list from YouTube page via Worker
+  const pageRes = await fetch(WORKER + encodeURIComponent(ytUrl));
   if (!pageRes.ok) throw new Error('Could not load YouTube page.');
   const html = await pageRes.text();
 
@@ -1066,9 +1066,9 @@ async function fetchTranscriptInBrowser(videoId) {
                  tracks[0];
   if (!track) throw new Error('No English captions found for this video.');
 
-  // Step 2: fetch transcript JSON (baseUrl is a youtube.com URL — also needs CORS proxy)
+  // Step 2: fetch transcript JSON via Worker
   const transcriptUrl = track.baseUrl + '&fmt=json3';
-  const jsonRes = await fetch(CORS + encodeURIComponent(transcriptUrl));
+  const jsonRes = await fetch(WORKER + encodeURIComponent(transcriptUrl));
   if (!jsonRes.ok) throw new Error('Could not load transcript.');
   const data   = await jsonRes.json();
   const events = data.events || [];
