@@ -1040,13 +1040,71 @@ function go() {
 }
 
 /* ═══════════════════════════════════════════════════
+   TRANSCRIPT FETCH (browser-side, avoids server IP block)
+═══════════════════════════════════════════════════ */
+function extractVideoId(url) {
+  const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+
+async function fetchTranscriptInBrowser(videoId) {
+  // Step 1: get the timedtext URL from YouTube's video page
+  const pageRes = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {credentials: 'omit'});
+  const html    = await pageRes.text();
+
+  // Extract caption tracks JSON from page source
+  const match = html.match(/"captionTracks":(\[.*?\])/);
+  if (!match) throw new Error('No captions found for this video.');
+
+  const tracks = JSON.parse(match[1]);
+  // Prefer English manual, then English auto, then first available
+  const track = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
+                tracks.find(t => t.languageCode === 'en') ||
+                tracks[0];
+  if (!track) throw new Error('No English captions found for this video.');
+
+  // Step 2: fetch the actual transcript XML
+  const xmlRes  = await fetch(track.baseUrl + '&fmt=json3', {credentials: 'omit'});
+  const data    = await xmlRes.json();
+  const events  = data.events || [];
+
+  // Step 3: extract and clean text
+  const seen = new Set();
+  const parts = [];
+  for (const ev of events) {
+    if (!ev.segs) continue;
+    const text = ev.segs.map(s => s.utf8 || '').join('').replace(/
+/g, ' ').trim();
+    if (text && text !== '[Music]' && text !== '[Applause]' && !seen.has(text)) {
+      seen.add(text);
+      parts.push(text);
+    }
+  }
+  if (!parts.length) throw new Error('Transcript is empty.');
+  return parts.join(' ');
+}
+
+/* ═══════════════════════════════════════════════════
    SINGLE VIDEO
 ═══════════════════════════════════════════════════ */
 async function runSingle(url) {
   show('preview-panel');
   let body;
-  try { body = buildBody({ url }, false); }  // single video is free — no API key needed
+  try { body = buildBody({ url }, false); }
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
+
+  // Fetch transcript browser-side to avoid server IP blocks
+  try {
+    logLine('🔍 Fetching transcript…', 'info');
+    const videoId  = extractVideoId(url);
+    if (!videoId) throw new Error('Could not extract video ID from URL.');
+    const transcript = await fetchTranscriptInBrowser(videoId);
+    body.transcript  = transcript;
+    logLine('📝 Transcript ready, generating notes…', 'info');
+  } catch (e) {
+    logLine('⚠ Browser transcript fetch failed: ' + e.message + ' — trying server fallback…', 'warn');
+    // Fall through — let server attempt it
+  }
 
   try {
     const res = await fetch(`${API}/stream-notes`, {
