@@ -664,7 +664,7 @@ footer a:hover { color: var(--user); }
   <div class="panel-header">
     <div class="tabs" style="margin:0;flex:1;border:none;background:transparent;padding:0;gap:4px">
       <button class="tab active" id="tab-single"   onclick="setMode('single')">📹 Single Video</button>
-      <button class="tab"        id="tab-playlist" onclick="setMode('playlist')">📋 Playlist → Telegram</button>
+      <button class="tab"        id="tab-playlist" onclick="setMode('playlist')">📋 Playlist <span style="font-size:10px;background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:4px;padding:1px 6px;margin-left:4px;font-weight:700;letter-spacing:.04em;">PREVIEW</span></span></button>
     </div>
   </div>
   <div class="panel-body">
@@ -1002,17 +1002,23 @@ function showResult({ title, meta, actions = [] }) {
 /* ═══════════════════════════════════════════════════
    BUILD REQUEST BODY
 ═══════════════════════════════════════════════════ */
-function buildBody(extra = {}) {
+function buildBody(extra = {}, requireApiKey = false) {
   const s = loadSettings();
   const body = { ...extra };
 
   if (!devMode) {
-    // User must provide key
-    if (!s.apiKey) throw new Error('Please set your API key in Settings (⚙).');
-    body.llm_provider  = s.provider  || 'gemini';
+    if (requireApiKey) {
+      // Playlist (Preview) — user must bring their own key
+      if (!s.apiKey) throw new Error(
+        '📋 Playlist generation requires your own API key.\n' +
+        'Add it in ⚙ Settings → API Key.\n' +
+        'Get a free key at console.groq.com or aistudio.google.com'
+      );
+    }
+    // Always attach key + provider if set; server uses its own key for single video if missing
+    if (s.apiKey) body.api_key = s.apiKey;
+    body.llm_provider  = s.provider  || 'groq';
     body.llm_model     = s.model     || undefined;
-    body.api_key       = s.apiKey;
-
   }
 
   const prompt = document.getElementById('s-system-prompt')?.value?.trim();
@@ -1039,7 +1045,7 @@ function go() {
 async function runSingle(url) {
   show('preview-panel');
   let body;
-  try { body = buildBody({ url }); }
+  try { body = buildBody({ url }, true); }  // playlist requires user API key
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
 
   try {
@@ -1106,7 +1112,7 @@ async function runSingle(url) {
 ═══════════════════════════════════════════════════ */
 async function runPlaylist(url) {
   let body;
-  try { body = buildBody({ url }); }
+  try { body = buildBody({ url }, true); }  // playlist requires user API key
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
 
   try {
