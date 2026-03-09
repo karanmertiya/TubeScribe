@@ -1048,32 +1048,34 @@ function extractVideoId(url) {
 }
 
 async function fetchTranscriptInBrowser(videoId) {
-  // Use Cloudflare Worker as proxy (not blocked by YouTube, adds CORS headers)
   const WORKER = 'https://nameless-king-c5b2.aspirantjee2392.workers.dev/?url=';
-  const ytUrl  = `https://www.youtube.com/watch?v=${videoId}`;
 
-  // Step 1: get caption track list from YouTube page via Worker
+  // Use YouTube's /watch page with desktop user agent — returns captionTracks in JSON
+  const ytUrl   = `https://www.youtube.com/watch?v=${videoId}&hl=en&gl=US`;
   const pageRes = await fetch(WORKER + encodeURIComponent(ytUrl));
-  if (!pageRes.ok) throw new Error('Could not load YouTube page.');
+  if (!pageRes.ok) throw new Error('Worker could not reach YouTube.');
   const html = await pageRes.text();
 
-  const match = html.match(/"captionTracks":(\[.*?\])/);
-  if (!match) throw new Error('No captions found for this video.');
+  // captionTracks is embedded in ytInitialPlayerResponse JSON in the page
+  let tracks = null;
+  const m1 = html.match(/"captionTracks":(\[.*?\])/);
+  if (m1) {
+    try { tracks = JSON.parse(m1[1]); } catch(e) {}
+  }
+  if (!tracks || !tracks.length) throw new Error('No captions found for this video.');
 
-  const tracks = JSON.parse(match[1]);
-  const track  = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
-                 tracks.find(t => t.languageCode === 'en') ||
-                 tracks[0];
+  const track = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
+                tracks.find(t => t.languageCode === 'en') ||
+                tracks[0];
   if (!track) throw new Error('No English captions found for this video.');
 
-  // Step 2: fetch transcript JSON via Worker
-  const transcriptUrl = track.baseUrl + '&fmt=json3';
-  const jsonRes = await fetch(WORKER + encodeURIComponent(transcriptUrl));
-  if (!jsonRes.ok) throw new Error('Could not load transcript.');
-  const data   = await jsonRes.json();
+  // Fetch the timedtext via Worker
+  const timedtextUrl = track.baseUrl + '&fmt=json3';
+  const tRes  = await fetch(WORKER + encodeURIComponent(timedtextUrl));
+  if (!tRes.ok) throw new Error('Could not fetch transcript data.');
+  const data   = await tRes.json();
   const events = data.events || [];
 
-  // Step 3: extract and deduplicate text
   const seen  = new Set();
   const parts = [];
   for (const ev of events) {
@@ -1084,7 +1086,7 @@ async function fetchTranscriptInBrowser(videoId) {
       parts.push(text);
     }
   }
-  if (!parts.length) throw new Error('Transcript is empty.');
+  if (!parts.length) throw new Error('Transcript is empty after parsing.');
   return parts.join(' ');
 }
 
