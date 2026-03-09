@@ -14,9 +14,13 @@ from youtube_transcript_api._errors import (
     NoTranscriptFound,
     TranscriptsDisabled,
     VideoUnavailable,
-    RequestBlocked,
-    IpBlocked,
 )
+# These were added in newer versions — import safely
+try:
+    from youtube_transcript_api._errors import RequestBlocked, IpBlocked
+    _BLOCK_ERRORS = (RequestBlocked, IpBlocked)
+except ImportError:
+    _BLOCK_ERRORS = ()
 
 log = logging.getLogger("tubescribe.youtube")
 
@@ -80,17 +84,23 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
 
         log.warning("Fetching transcript for video_id=%s", video_id)
 
+        # Build proxy config if PROXY_URL is set
+        proxy_url = os.getenv("PROXY_URL")
+        proxies   = {"https": proxy_url, "http": proxy_url} if proxy_url else None
+        if proxies:
+            log.warning("Using proxy for transcript fetch")
+
         # New API: instantiate the class, then use list_transcripts
         ytt = YouTubeTranscriptApi()
         try:
-            transcript_list = ytt.list(video_id)
+            transcript_list = ytt.list(video_id, proxies=proxies)
             # Prefer manually created English, then auto-generated
             try:
                 transcript = transcript_list.find_manually_created_transcript(["en"])
             except NoTranscriptFound:
                 transcript = transcript_list.find_generated_transcript(["en"])
             fetched = transcript.fetch()
-        except (RequestBlocked, IpBlocked) as exc:
+        except _BLOCK_ERRORS as exc:  # type: ignore
             raise FileNotFoundError(
                 "YouTube is blocking transcript requests from this server IP. "
                 "This is a YouTube restriction on cloud/datacenter IPs. "
