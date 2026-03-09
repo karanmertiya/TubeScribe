@@ -145,17 +145,26 @@ async def run_playlist(
 
 
 async def run_single_stream(
-    video_url: str,
-    llm:       LLMConfig,
-    dev_mode:  bool,
-    session_id: str = "",
+    video_url:           str,
+    llm:                 LLMConfig,
+    dev_mode:            bool,
+    session_id:          str = "",
+    prefetched_title:     str | None = None,
+    prefetched_transcript: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Single-video pipeline — streams markdown chunks as SSE."""
+    """Single-video pipeline — streams markdown chunks as SSE.
+    If prefetched_transcript is provided, skip the YouTube fetch entirely.
+    """
     mode = "dev" if dev_mode else "user"
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            title, transcript = extract(video_url, tmp)
+            if prefetched_transcript:
+                # Transcript was fetched browser-side — no YouTube server request needed
+                title      = prefetched_title or "Untitled Video"
+                transcript = prefetched_transcript
+            else:
+                title, transcript = extract(video_url, tmp)
             yield f"data: {json.dumps({'title': title})}\n\n"
 
             chunks = chunk(transcript, CHUNK_WORDS)
