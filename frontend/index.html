@@ -1043,7 +1043,7 @@ function go() {
    TRANSCRIPT FETCH (browser-side, avoids server IP block)
 ═══════════════════════════════════════════════════ */
 function extractVideoId(url) {
-  const m = url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+  const m = url.match(/(?:v=|youtu[.]be[/]|embed[/]|shorts[/])([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
 
@@ -1073,8 +1073,7 @@ async function fetchTranscriptInBrowser(videoId) {
   const parts = [];
   for (const ev of events) {
     if (!ev.segs) continue;
-    const text = ev.segs.map(s => s.utf8 || '').join('').replace(/
-/g, ' ').trim();
+    const text = ev.segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ').trim();
     if (text && text !== '[Music]' && text !== '[Applause]' && !seen.has(text)) {
       seen.add(text);
       parts.push(text);
