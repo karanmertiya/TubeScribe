@@ -69,8 +69,8 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "subtitlesformat":   "vtt",
         "skip_download":     True,
         "outtmpl":           base,
-        # Client fallback chain: web_creator handles datacenter IPs + respects cookies
-        "extractor_args":    {"youtube": {"player_client": ["web_creator", "web", "android"]}},
+        # ios client works reliably on server IPs and respects cookies
+        "extractor_args":    {"youtube": {"player_client": ["ios"]}},
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
