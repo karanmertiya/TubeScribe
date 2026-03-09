@@ -1,6 +1,7 @@
 """Resolve a YouTube URL (single video or playlist) to a list of entries."""
 from __future__ import annotations
 import yt_dlp
+from .transcript import _base_ydl_opts
 
 
 def resolve(url: str) -> list[dict]:
@@ -8,7 +9,7 @@ def resolve(url: str) -> list[dict]:
     Returns [{"url": str, "title": str}, …].
     Works for playlists, channels, and single videos.
     """
-    ydl_opts = {"quiet": True, "extract_flat": True, "skip_download": True}
+    ydl_opts = _base_ydl_opts({"extract_flat": True})
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
