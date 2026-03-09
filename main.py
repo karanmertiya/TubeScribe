@@ -235,9 +235,13 @@ async def stream_notes(request: Request):
     if err:
         return err
 
-    session = request.cookies.get("session", "")
+    session    = request.cookies.get("session", "")
+    pre_title  = (body.get("title") or "").strip() or None
+    pre_transcript = (body.get("transcript") or "").strip() or None
     return StreamingResponse(
-        run_single_stream(url, llm, dev, session),
+        run_single_stream(url, llm, dev, session,
+                          prefetched_title=pre_title,
+                          prefetched_transcript=pre_transcript),
         media_type="text/event-stream",
     )
 
