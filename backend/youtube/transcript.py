@@ -67,6 +67,8 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "subtitlesformat":   "vtt",
         "skip_download":     True,
         "outtmpl":           base,
+        # Use tv_embedded client — bypasses SABR streaming restrictions on datacenter IPs
+        "extractor_args":    {"youtube": {"player_client": ["tv_embedded"]}},
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
