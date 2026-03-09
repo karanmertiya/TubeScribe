@@ -67,14 +67,13 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "subtitlesformat":   "vtt",
         "skip_download":     True,
         "outtmpl":           base,
-        "format":            "none",  # don't select any video/audio format — subtitles only
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info  = ydl.extract_info(video_url, download=True)
+            info  = ydl.extract_info(video_url, download=False)
             title = info.get("title", "Untitled Video")
     finally:
         # Clean up temp cookie file if we wrote one
