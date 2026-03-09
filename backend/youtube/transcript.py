@@ -45,9 +45,11 @@ def _base_ydl_opts(extra: dict | None = None) -> dict:
     cookies = _cookies_path()
     if cookies:
         opts["cookiefile"] = cookies
-        log.debug("yt-dlp: using cookies from %s", cookies)
+        log.warning("yt-dlp: using cookies file (%d bytes)", os.path.getsize(cookies) if os.path.exists(cookies) else -1)
     else:
-        log.debug("yt-dlp: no cookies configured")
+        log.warning("yt-dlp: NO cookies configured — YOUTUBE_COOKIES env var is %s",
+                    "SET but empty" if os.getenv("YOUTUBE_COOKIES") == "" else
+                    "NOT SET" if os.getenv("YOUTUBE_COOKIES") is None else "SET")
     if extra:
         opts.update(extra)
     return opts
@@ -67,8 +69,8 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
         "subtitlesformat":   "vtt",
         "skip_download":     True,
         "outtmpl":           base,
-        # Use tv_embedded client — bypasses SABR streaming restrictions on datacenter IPs
-        "extractor_args":    {"youtube": {"player_client": ["tv_embedded"]}},
+        # Client fallback chain: web_creator handles datacenter IPs + respects cookies
+        "extractor_args":    {"youtube": {"player_client": ["web_creator", "web", "android"]}},
     })
 
     cookies_tmp = ydl_opts.get("cookiefile") if _COOKIES_TEXT else None
