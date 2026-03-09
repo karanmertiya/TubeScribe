@@ -10,12 +10,12 @@ import tempfile
 
 import yt_dlp
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import GenericProxyConfig
 from youtube_transcript_api._errors import (
     NoTranscriptFound,
     TranscriptsDisabled,
     VideoUnavailable,
 )
-# These were added in newer versions — import safely
 try:
     from youtube_transcript_api._errors import RequestBlocked, IpBlocked
     _BLOCK_ERRORS = (RequestBlocked, IpBlocked)
@@ -84,13 +84,23 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
 
         log.warning("Fetching transcript for video_id=%s", video_id)
 
-        # Build proxy config if PROXY_URL is set
+        # Use Tor (socks5://127.0.0.1:9050) if running, else fallback to PROXY_URL env var
         proxy_url = os.getenv("PROXY_URL")
-        if proxy_url:
-            log.warning("Using proxy for transcript fetch")
+        tor_proxy  = "socks5://127.0.0.1:9050"
 
-        # New API: pass proxies at instantiation time
-        ytt = YouTubeTranscriptApi(proxies={"https": proxy_url, "http": proxy_url}) if proxy_url else YouTubeTranscriptApi()
+        # Prefer Tor (started in CMD), fall back to PROXY_URL, fall back to direct
+        effective_proxy = tor_proxy if os.getenv("USE_TOR", "true").lower() != "false" else proxy_url
+
+        if effective_proxy:
+            log.warning("Using proxy for transcript fetch: %s", effective_proxy.split("@")[-1])
+            ytt = YouTubeTranscriptApi(
+                proxy_config=GenericProxyConfig(
+                    http_url=effective_proxy,
+                    https_url=effective_proxy,
+                )
+            )
+        else:
+            ytt = YouTubeTranscriptApi()
         try:
             transcript_list = ytt.list(video_id)
             # Prefer manually created English, then auto-generated
