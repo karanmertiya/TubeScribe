@@ -86,14 +86,13 @@ def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
 
         # Build proxy config if PROXY_URL is set
         proxy_url = os.getenv("PROXY_URL")
-        proxies   = {"https": proxy_url, "http": proxy_url} if proxy_url else None
-        if proxies:
+        if proxy_url:
             log.warning("Using proxy for transcript fetch")
 
-        # New API: instantiate the class, then use list_transcripts
-        ytt = YouTubeTranscriptApi()
+        # New API: pass proxies at instantiation time
+        ytt = YouTubeTranscriptApi(proxies={"https": proxy_url, "http": proxy_url}) if proxy_url else YouTubeTranscriptApi()
         try:
-            transcript_list = ytt.list(video_id, proxies=proxies)
+            transcript_list = ytt.list(video_id)
             # Prefer manually created English, then auto-generated
             try:
                 transcript = transcript_list.find_manually_created_transcript(["en"])
