@@ -66,6 +66,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fontconfig \
     ffmpeg \
     curl \
+    tor \
     && rm -rf /var/lib/apt/lists/*
 
 # Python packages from builder stage
@@ -97,4 +98,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --access-log --log-level info"]
+CMD ["sh", "-c", "tor --SocksPort 9050 --Log 'warn stdout' & sleep 3 && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --access-log --log-level info"]
