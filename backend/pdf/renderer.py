@@ -109,7 +109,39 @@ hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 """
 
 
-def _safe(s: str) -> str:
+def _fix_inline_lists(md: str) -> str:
+    """
+    Fix LLM habit of writing inline lists on one line:
+      'text: - item1 - item2 - item3'
+    → proper markdown:
+      'text:\n- item1\n- item2\n- item3'
+    """
+    lines = md.splitlines()
+    result = []
+    for line in lines:
+        # If a line contains multiple '- ' patterns mid-sentence, split them
+        # Match: any text followed by two or more '- something' segments
+        if re.search(r'.+\s-\s.+\s-\s', line):
+            # Split on ' - ' but only when preceded by non-newline content
+            # First, find the point where the first inline list item starts
+            m = re.match(r'^(.*?)\s+-\s+(.+)$', line)
+            if m:
+                prefix = m.group(1).rstrip()
+                rest   = '- ' + m.group(2)
+                # Split rest into individual items
+                items  = re.split(r'\s+-\s+', rest)
+                if prefix:
+                    result.append(prefix)
+                for item in items:
+                    item = item.strip()
+                    if item:
+                        result.append(f'- {item}' if not item.startswith('-') else item)
+                continue
+        result.append(line)
+    return '\n'.join(result)
+
+
+
     return re.sub(r"[<>&\"']", "", s)
 
 
@@ -117,7 +149,7 @@ def to_pdf(title: str, md_content: str, provider_label: str = "") -> bytes:
     """Render a titled Markdown document to PDF bytes."""
     ts   = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     body = markdown2.markdown(
-        md_content,
+        _fix_inline_lists(md_content),
         extras=["fenced-code-blocks", "tables", "footnotes", "strike", "task_list"],
     )
     meta = f"Generated: {ts}" + (f" &nbsp;|&nbsp; {provider_label}" if provider_label else "")
