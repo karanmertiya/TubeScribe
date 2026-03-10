@@ -7,9 +7,6 @@ from io import BytesIO
 import markdown2
 from weasyprint import HTML as WP
 
-# Optional LLMConfig for the metadata line in the PDF header
-_LLMConfig = None  # imported lazily to avoid circular imports
-
 _CSS = """
 /* Fonts are baked into the Docker image at /usr/local/share/fonts/tubescribe/
    — no outbound HTTP requests during PDF rendering.
@@ -109,40 +106,63 @@ hr { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 """
 
 
+def _safe(s: str) -> str:
+    """Escape HTML special characters to prevent injection in PDF output."""
+    return re.sub(r"[<>&\"']", "", s)
+
+
 def _fix_inline_lists(md: str) -> str:
     """
-    Fix LLM habit of writing inline lists on one line:
-      'text: - item1 - item2 - item3'
-    → proper markdown:
-      'text:\n- item1\n- item2\n- item3'
+    Fix two LLM formatting habits that break Markdown list rendering:
+
+    1. Inline dash lists on one line:
+         'We have: - item1 - item2 - item3'
+       becomes:
+         'We have:\n- item1\n- item2\n- item3'
+
+    2. Inline asterisk lists like '* item one * item two':
+       becomes:
+         '- item one\n- item two'
     """
     lines = md.splitlines()
     result = []
+
     for line in lines:
-        # If a line contains multiple '- ' patterns mid-sentence, split them
-        # Match: any text followed by two or more '- something' segments
-        if re.search(r'.+\s-\s.+\s-\s', line):
-            # Split on ' - ' but only when preceded by non-newline content
-            # First, find the point where the first inline list item starts
+        # Pattern 1: inline asterisk list  (* item * item)
+        # Guard against bold/italic (**text** or *italic*) by requiring space after *
+        if re.search(r'(?<!\*)\* \S.+(?<!\*)\* \S', line):
+            m = re.match(r'^(.*?)\s*(?<!\*)\*\s+(.+)$', line)
+            if m:
+                prefix = m.group(1).rstrip()
+                rest   = m.group(2)
+                items  = re.split(r'\s+(?<!\*)\*\s+', rest)
+                if prefix:
+                    result.append(prefix)
+                for item in items:
+                    item = item.strip()
+                    if item:
+                        result.append(f'- {item}')
+                continue
+
+        # Pattern 2: inline dash list  (text - item - item)
+        # Needs at least 2 " - " occurrences to avoid false positives on ranges like "5 - 10"
+        if len(re.findall(r'\s-\s', line)) >= 2:
             m = re.match(r'^(.*?)\s+-\s+(.+)$', line)
             if m:
                 prefix = m.group(1).rstrip()
                 rest   = '- ' + m.group(2)
-                # Split rest into individual items
                 items  = re.split(r'\s+-\s+', rest)
                 if prefix:
                     result.append(prefix)
                 for item in items:
                     item = item.strip()
                     if item:
-                        result.append(f'- {item}' if not item.startswith('-') else item)
+                        result.append(item if item.startswith('-') else f'- {item}')
                 continue
+
         result.append(line)
+
     return '\n'.join(result)
-
-
-
-    return re.sub(r"[<>&\"']", "", s)
 
 
 def to_pdf(title: str, md_content: str, provider_label: str = "") -> bytes:
