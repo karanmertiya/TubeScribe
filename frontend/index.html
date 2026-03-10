@@ -1048,51 +1048,27 @@ function extractVideoId(url) {
 }
 
 async function fetchTranscriptInBrowser(videoId) {
-  const WORKER     = 'https://nameless-king-c5b2.aspirantjee2392.workers.dev/?url=';
-  const PLAYER_API = 'https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+  // YouTube's timedtext API allows CORS — fetch directly from browser, no proxy needed!
+  // Try auto-generated English first, then manual English
+  const urls = [
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`,
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&kind=asr&fmt=json3`,
+  ];
 
-  // Step 1: call youtubei player API via Worker (POST with Android client)
-  const payload = JSON.stringify({
-    videoId,
-    context: {
-      client: {
-        clientName: 'ANDROID',
-        clientVersion: '19.09.37',
-        androidSdkVersion: 30,
-        hl: 'en',
-        gl: 'US',
-      }
+  let events = null;
+  for (const url of urls) {
+    const res = await fetch(url);
+    if (!res.ok) continue;
+    const data = await res.json();
+    if (data.events && data.events.length > 0) {
+      events = data.events;
+      break;
     }
-  });
-
-  const playerRes = await fetch(WORKER + encodeURIComponent(PLAYER_API), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: payload,
-  });
-  if (!playerRes.ok) throw new Error('Could not reach YouTube player API.');
-  const playerData = await playerRes.json();
-
-  // Step 2: extract caption tracks
-  let tracks;
-  try {
-    tracks = playerData.captions.playerCaptionsTracklistRenderer.captionTracks;
-  } catch(e) {
-    throw new Error('No captions available for this video.');
   }
-  if (!tracks || !tracks.length) throw new Error('No captions available for this video.');
 
-  const track = tracks.find(t => t.languageCode === 'en' && !t.kind) ||
-                tracks.find(t => t.languageCode === 'en') ||
-                tracks[0];
-  if (!track) throw new Error('No English captions found.');
-
-  // Step 3: fetch timedtext JSON via Worker
-  const timedtextUrl = track.baseUrl + '&fmt=json3';
-  const tRes = await fetch(WORKER + encodeURIComponent(timedtextUrl));
-  if (!tRes.ok) throw new Error('Could not fetch transcript data.');
-  const data   = await tRes.json();
-  const events = data.events || [];
+  if (!events || !events.length) {
+    throw new Error('No English captions found for this video.');
+  }
 
   const seen  = new Set();
   const parts = [];
@@ -1117,11 +1093,18 @@ async function runSingle(url) {
   try { body = buildBody({ url }, false); }
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
 
-  // Fetch transcript browser-side to avoid server IP blocks
+  // Fetch transcript browser-side — YouTube timedtext API allows CORS, no proxy needed
   try {
     logLine('🔍 Fetching transcript…', 'info');
-    const videoId  = extractVideoId(url);
+    const videoId = extractVideoId(url);
     if (!videoId) throw new Error('Could not extract video ID from URL.');
+
+    // Get title from oEmbed (also CORS-friendly)
+    try {
+      const oEmbed = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if (oEmbed.ok) { const od = await oEmbed.json(); body.title = od.title || ''; }
+    } catch(_) {}
+
     const transcript = await fetchTranscriptInBrowser(videoId);
     body.transcript  = transcript;
     logLine('📝 Transcript ready, generating notes…', 'info');
