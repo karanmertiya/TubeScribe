@@ -38,13 +38,15 @@ def get_transcript_from_url(llm: LLMConfig, video_url: str) -> tuple[str, str]:
 
         client = genai.Client(api_key=llm.api_key)
 
+        # Ask for notes directly instead of raw transcript — much more token-efficient
+        # and avoids context window limits on long videos
         prompt = (
-            "You are a transcript extractor.\n"
+            "You are an elite academic note-taking assistant.\n"
             "Given this YouTube video:\n"
             "1. Output the video title on the first line as: TITLE: <title>\n"
-            "2. Then output the full verbatim transcript of the video, exactly as spoken, "
-            "with no summarization, no formatting, no timestamps — just the raw spoken words.\n"
-            "Output nothing else."
+            "2. Then generate comprehensive, beautifully structured Markdown notes.\n\n"
+            + llm.system_prompt +
+            "\n\nGenerate the complete notes now."
         )
 
         response = client.models.generate_content(
@@ -55,7 +57,7 @@ def get_transcript_from_url(llm: LLMConfig, video_url: str) -> tuple[str, str]:
                     types.Part(text=prompt),
                 ]
             ),
-            config=types.GenerateContentConfig(temperature=0.0),
+            config=types.GenerateContentConfig(temperature=0.3),
         )
 
         text = response.text or ""
@@ -63,15 +65,17 @@ def get_transcript_from_url(llm: LLMConfig, video_url: str) -> tuple[str, str]:
         title = "Untitled Video"
         if lines and lines[0].startswith("TITLE:"):
             title = lines[0].replace("TITLE:", "").strip()
-            transcript = "\n".join(lines[1:]).strip()
+            notes = "\n".join(lines[1:]).strip()
         else:
-            transcript = text.strip()
+            notes = text.strip()
 
-        if not transcript:
-            raise RuntimeError("Gemini returned empty transcript.")
+        if not notes:
+            raise RuntimeError("Gemini returned empty response.")
 
-        log.warning("Gemini transcript extracted: %d words for '%s'", len(transcript.split()), title)
-        return title, transcript
+        log.warning("Gemini notes generated for '%s'", title)
+        # Return notes as the "transcript" — pipeline will pass it through call_llm
+        # but we mark it so pipeline knows it's already processed
+        return title, f"__GEMINI_NOTES__\n{notes}"
 
     except Exception as exc:
         log.error("Gemini transcript extraction error: %s", exc)
