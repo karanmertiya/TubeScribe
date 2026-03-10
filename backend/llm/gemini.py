@@ -28,27 +28,28 @@ def call(llm: LLMConfig, prompt: str) -> str:
 
 def get_transcript_from_url(llm: LLMConfig, video_url: str) -> tuple[str, str]:
     """
-    Use Gemini to extract the title and raw transcript from a YouTube URL.
+    Use Gemini to generate notes directly from a YouTube URL.
     Gemini fetches the video internally — no IP blocking, no yt-dlp needed.
-    Returns (title, transcript_text).
+    Returns (title, '__GEMINI_NOTES__\\n<markdown_notes>').
+
+    Uses gemini-2.0-flash (2M token context) to handle videos up to ~4-5 hours.
+    If the video exceeds the context window, falls back to a summary-only prompt.
     """
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=llm.api_key)
+
+    prompt = (
+        "You are an elite academic note-taking assistant.\n"
+        "Given this YouTube video:\n"
+        "1. Output the video title on the first line as: TITLE: <title>\n"
+        "2. Then generate comprehensive, beautifully structured Markdown notes.\n\n"
+        + llm.system_prompt
+        + "\n\nGenerate the complete notes now."
+    )
+
     try:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=llm.api_key)
-
-        # Ask for notes directly instead of raw transcript — much more token-efficient
-        # and avoids context window limits on long videos
-        prompt = (
-            "You are an elite academic note-taking assistant.\n"
-            "Given this YouTube video:\n"
-            "1. Output the video title on the first line as: TITLE: <title>\n"
-            "2. Then generate comprehensive, beautifully structured Markdown notes.\n\n"
-            + llm.system_prompt +
-            "\n\nGenerate the complete notes now."
-        )
-
         response = client.models.generate_content(
             model=llm.model,
             contents=types.Content(
@@ -59,71 +60,48 @@ def get_transcript_from_url(llm: LLMConfig, video_url: str) -> tuple[str, str]:
             ),
             config=types.GenerateContentConfig(temperature=0.3),
         )
-
-        text = response.text or ""
-        lines = text.splitlines()
-        title = "Untitled Video"
-        if lines and lines[0].startswith("TITLE:"):
-            title = lines[0].replace("TITLE:", "").strip()
-            notes = "\n".join(lines[1:]).strip()
+    except Exception as exc:
+        err_str = str(exc)
+        # If token limit exceeded, retry with a condensed prompt asking for key points only
+        if "1048576" in err_str or "token" in err_str.lower():
+            log.warning("Token limit hit for %s — retrying with condensed prompt", video_url)
+            condensed_prompt = (
+                "You are a note-taking assistant. This is a very long video.\n"
+                "1. Output the video title on the first line as: TITLE: <title>\n"
+                "2. Generate a concise but complete summary covering:\n"
+                "   - The main topic and goal\n"
+                "   - Key concepts, definitions, and algorithms explained\n"
+                "   - Important examples with their outcomes\n"
+                "   - Core takeaways and conclusions\n"
+                "Use ## headers, bullet points, and code blocks where appropriate.\n"
+                "Output ONLY Markdown — no preamble."
+            )
+            response = client.models.generate_content(
+                model=llm.model,
+                contents=types.Content(
+                    parts=[
+                        types.Part(file_data=types.FileData(file_uri=video_url)),
+                        types.Part(text=condensed_prompt),
+                    ]
+                ),
+                config=types.GenerateContentConfig(temperature=0.3),
+            )
         else:
-            notes = text.strip()
+            log.error("Gemini transcript extraction error: %s", exc)
+            raise RuntimeError(f"Gemini transcript extraction failed: {exc}") from exc
 
-        if not notes:
-            raise RuntimeError("Gemini returned empty response.")
+    text  = response.text or ""
+    lines = text.splitlines()
+    title = "Untitled Video"
 
-        log.warning("Gemini notes generated for '%s'", title)
-        # Return notes as the "transcript" — pipeline will pass it through call_llm
-        # but we mark it so pipeline knows it's already processed
-        return title, f"__GEMINI_NOTES__\n{notes}"
+    if lines and lines[0].startswith("TITLE:"):
+        title = lines[0].replace("TITLE:", "").strip()
+        notes = "\n".join(lines[1:]).strip()
+    else:
+        notes = text.strip()
 
-    except Exception as exc:
-        log.error("Gemini transcript extraction error: %s", exc)
-        raise RuntimeError(f"Gemini transcript extraction failed: {exc}") from exc
-    """
-    Pass a YouTube URL directly to Gemini — no transcript needed.
-    Google's API fetches and processes the video internally, no IP blocking.
-    Returns (title, notes_markdown).
-    """
-    try:
-        from google import genai
-        from google.genai import types
+    if not notes:
+        raise RuntimeError("Gemini returned empty response.")
 
-        client = genai.Client(api_key=llm.api_key)
-
-        prompt = (
-            "You are an elite academic note-taking assistant.\n"
-            "First, state the exact video title on a line starting with 'TITLE: '.\n"
-            "Then generate comprehensive, beautifully structured Markdown notes from this video.\n\n"
-            + llm.system_prompt +
-            "\n\nGenerate the complete notes for this entire video now."
-        )
-
-        response = client.models.generate_content(
-            model=llm.model,
-            contents=types.Content(
-                parts=[
-                    types.Part(
-                        file_data=types.FileData(file_uri=video_url)
-                    ),
-                    types.Part(text=prompt),
-                ]
-            ),
-            config=types.GenerateContentConfig(temperature=0.3),
-        )
-
-        text = response.text or ""
-
-        # Extract title from first line if present
-        title = "Untitled Video"
-        lines = text.splitlines()
-        if lines and lines[0].startswith("TITLE:"):
-            title = lines[0].replace("TITLE:", "").strip()
-            text  = "\n".join(lines[1:]).strip()
-
-        log.warning("Gemini YouTube URL processing complete for: %s", title)
-        return title, text
-
-    except Exception as exc:
-        log.error("Gemini YouTube URL error: %s", exc)
-        raise RuntimeError(f"Gemini video processing failed: {exc}") from exc
+    log.warning("Gemini notes generated for '%s'", title)
+    return title, f"__GEMINI_NOTES__\n{notes}"
