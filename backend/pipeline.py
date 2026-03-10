@@ -160,21 +160,46 @@ async def run_single_stream(
     with tempfile.TemporaryDirectory() as tmp:
         try:
             if prefetched_transcript:
-                # Transcript was fetched browser-side — no YouTube server request needed
+                # Transcript fetched browser-side — skip YouTube entirely
                 title      = prefetched_title or "Untitled Video"
                 transcript = prefetched_transcript
+                yield f"data: {json.dumps({'title': title})}\n\n"
+
+                chunks = chunk(transcript, CHUNK_WORDS)
+                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+
+                for i, c in enumerate(chunks, 1):
+                    notes = call_llm(llm, c)
+                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                    if len(chunks) > 1:
+                        time.sleep(0.2)
+
             else:
-                title, transcript = extract(video_url, tmp)
-            yield f"data: {json.dumps({'title': title})}\n\n"
+                # No pre-fetched transcript — use Gemini to extract it (bypasses IP blocks)
+                # Then use whatever LLM is configured for note generation
+                from backend.llm import gemini as gemini_mod
+                from backend.llm.config import LLMConfig as _LLMConfig
 
-            chunks = chunk(transcript, CHUNK_WORDS)
-            yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+                # Build a Gemini config using server key for transcript extraction only
+                gemini_llm = _LLMConfig(
+                    provider="gemini",
+                    api_key=os.getenv("GEMINI_API_KEY", ""),
+                    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+                    system_prompt=llm.system_prompt,
+                )
 
-            for i, c in enumerate(chunks, 1):
-                notes = call_llm(llm, c)
-                yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                if len(chunks) > 1:
-                    time.sleep(0.2)
+                yield f"data: {json.dumps({'title': 'Extracting transcript via Gemini…'})}\n\n"
+                title, transcript = gemini_mod.get_transcript_from_url(gemini_llm, video_url)
+                yield f"data: {json.dumps({'title': title})}\n\n"
+
+                chunks = chunk(transcript, CHUNK_WORDS)
+                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+
+                for i, ch in enumerate(chunks, 1):
+                    notes = call_llm(llm, ch)
+                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                    if len(chunks) > 1:
+                        time.sleep(0.2)
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
