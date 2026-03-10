@@ -3,7 +3,8 @@ Pipeline orchestration — yields SSE events.
 Imports from all backend packages; nothing else should import from here
 except main.py routes.
 """
-from __future__ import annotations
+import base64
+import datetime
 import hashlib
 import json
 import logging
@@ -14,6 +15,8 @@ from typing import AsyncGenerator
 
 from backend import analytics
 from backend.llm import LLMConfig, call_llm
+from backend.llm import gemini as gemini_mod
+from backend.llm.config import LLMConfig as _LLMConfig
 from backend.pdf import to_pdf, build_index, merge
 from backend.telegram import send_document
 from backend.youtube import extract, chunk, resolve
@@ -135,7 +138,6 @@ async def run_playlist(
                    videos_done=len(done_titles), videos_total=total)
     else:
         # Return PDF directly — browser triggers download from base64 in SSE payload
-        import base64
         pdf_b64 = base64.b64encode(merged).decode()
         yield _sse("done",
                    f"🎉 {len(done_titles)} notes ready — downloading…",
@@ -176,12 +178,6 @@ async def run_single_stream(
 
             else:
                 # No pre-fetched transcript — use Gemini to extract it (bypasses IP blocks)
-                # Then use whatever LLM is configured for note generation
-                from backend.llm import gemini as gemini_mod
-                from backend.llm.config import LLMConfig as _LLMConfig
-
-                # Build a Gemini config using server key for transcript extraction only
-                # Use gemini-2.0-flash — 2M token context handles long videos
                 gemini_llm = _LLMConfig(
                     provider="gemini",
                     api_key=os.getenv("GEMINI_API_KEY", ""),
