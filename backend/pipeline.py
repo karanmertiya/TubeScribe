@@ -192,14 +192,20 @@ async def run_single_stream(
                 title, transcript = gemini_mod.get_transcript_from_url(gemini_llm, video_url)
                 yield f"data: {json.dumps({'title': title})}\n\n"
 
-                chunks = chunk(transcript, CHUNK_WORDS)
-                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+                if transcript.startswith("__GEMINI_NOTES__\n"):
+                    # Gemini already generated notes — emit directly, skip Groq
+                    notes = transcript[len("__GEMINI_NOTES__\n"):]
+                    yield f"data: {json.dumps({'total_chunks': 1})}\n\n"
+                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': 1, 'total_chunks': 1})}\n\n"
+                else:
+                    chunks = chunk(transcript, CHUNK_WORDS)
+                    yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
 
-                for i, ch in enumerate(chunks, 1):
-                    notes = call_llm(llm, ch)
-                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                    if len(chunks) > 1:
-                        time.sleep(0.2)
+                    for i, ch in enumerate(chunks, 1):
+                        notes = call_llm(llm, ch)
+                        yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                        if len(chunks) > 1:
+                            time.sleep(0.2)
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
