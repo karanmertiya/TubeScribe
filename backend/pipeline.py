@@ -181,10 +181,11 @@ async def run_single_stream(
                 from backend.llm.config import LLMConfig as _LLMConfig
 
                 # Build a Gemini config using server key for transcript extraction only
+                # Use gemini-2.0-flash — 2M token context handles long videos
                 gemini_llm = _LLMConfig(
                     provider="gemini",
                     api_key=os.getenv("GEMINI_API_KEY", ""),
-                    model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+                    model="gemini-2.0-flash",
                     system_prompt=llm.system_prompt,
                 )
 
