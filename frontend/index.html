@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YT Notes Maker</title>
+<title>TubeScribe</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
@@ -574,7 +574,7 @@ footer a:hover { color: var(--user); }
 
 <!-- ══ TOP BAR ════════════════════════════════════════ -->
 <div class="topbar">
-  <div class="logo">YT <span>Notes</span></div>
+  <div class="logo">Tube<span>Scribe</span></div>
   <div class="topbar-right">
     <div class="chip" id="llm-chip"><span class="chip-dot" id="llm-dot"></span><span id="llm-label">…</span></div>
     <div class="chip" id="tg-chip"><span class="chip-dot" id="tg-dot"></span><span id="tg-label">…</span></div>
@@ -706,6 +706,7 @@ footer a:hover { color: var(--user); }
         <span id="chunk-label">0/0</span>
       </span>
       <button class="btn btn-ghost btn-sm" id="dl-btn" style="display:none" onclick="downloadPDF()">⬇ PDF</button>
+      <button class="btn btn-ghost btn-sm" id="copy-btn" style="display:none" onclick="copyMarkdown()">⎘ Copy</button>
     </div>
   </div>
   <div class="preview-body cursor" id="preview-body"></div>
@@ -932,6 +933,7 @@ function resetUI() {
   document.getElementById('preview-body').innerHTML = '';
   document.getElementById('prog-bar').style.width = '0%';
   document.getElementById('dl-btn').style.display = 'none';
+  document.getElementById('copy-btn').style.display = 'none';
   document.getElementById('chunk-chip').style.display = 'none';
   document.getElementById('stat-done').textContent = '0';
   document.getElementById('stat-total').textContent = '?';
@@ -1042,47 +1044,7 @@ function go() {
 /* ═══════════════════════════════════════════════════
    TRANSCRIPT FETCH (browser-side, avoids server IP block)
 ═══════════════════════════════════════════════════ */
-function extractVideoId(url) {
-  const m = url.match(/(?:v=|youtu[.]be[/]|embed[/]|shorts[/])([A-Za-z0-9_-]{11})/);
-  return m ? m[1] : null;
-}
 
-async function fetchTranscriptInBrowser(videoId) {
-  // YouTube's timedtext API allows CORS — fetch directly from browser, no proxy needed!
-  // Try auto-generated English first, then manual English
-  const urls = [
-    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`,
-    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&kind=asr&fmt=json3`,
-  ];
-
-  let events = null;
-  for (const url of urls) {
-    const res = await fetch(url);
-    if (!res.ok) continue;
-    const data = await res.json();
-    if (data.events && data.events.length > 0) {
-      events = data.events;
-      break;
-    }
-  }
-
-  if (!events || !events.length) {
-    throw new Error('No English captions found for this video.');
-  }
-
-  const seen  = new Set();
-  const parts = [];
-  for (const ev of events) {
-    if (!ev.segs) continue;
-    const text = ev.segs.map(s => s.utf8 || '').join('').replace(/\n/g, ' ').trim();
-    if (text && text !== '[Music]' && text !== '[Applause]' && !seen.has(text)) {
-      seen.add(text);
-      parts.push(text);
-    }
-  }
-  if (!parts.length) throw new Error('Transcript is empty.');
-  return parts.join(' ');
-}
 
 /* ═══════════════════════════════════════════════════
    SINGLE VIDEO
@@ -1093,25 +1055,17 @@ async function runSingle(url) {
   try { body = buildBody({ url }, false); }
   catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
 
-  // Fetch transcript browser-side — YouTube timedtext API allows CORS, no proxy needed
+  // Fetch video title browser-side via oEmbed (CORS-friendly, no server needed)
+  // Note: YouTube's timedtext API is dead for server IPs — Gemini handles transcript server-side
   try {
-    logLine('🔍 Fetching transcript…', 'info');
-    const videoId = extractVideoId(url);
-    if (!videoId) throw new Error('Could not extract video ID from URL.');
+    const oEmbed = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+    if (oEmbed.ok) {
+      const od = await oEmbed.json();
+      if (od.title) { body.title = od.title; videoTitle = od.title; }
+    }
+  } catch(_) {}
 
-    // Get title from oEmbed (also CORS-friendly)
-    try {
-      const oEmbed = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-      if (oEmbed.ok) { const od = await oEmbed.json(); body.title = od.title || ''; }
-    } catch(_) {}
-
-    const transcript = await fetchTranscriptInBrowser(videoId);
-    body.transcript  = transcript;
-    logLine('📝 Transcript ready, generating notes…', 'info');
-  } catch (e) {
-    logLine('⚠ Browser transcript fetch failed: ' + e.message + ' — trying server fallback…', 'warn');
-    // Fall through — let server attempt it
-  }
+  logLine('🤖 Sending to Gemini for processing…');
 
   try {
     const res = await fetch(`${API}/stream-notes`, {
@@ -1132,9 +1086,12 @@ async function runSingle(url) {
         if (!line.startsWith('data: ')) continue;
         let d; try { d = JSON.parse(line.slice(6)); } catch { continue; }
 
-        if (d.title) {
+        if (d.title && d.title !== 'Extracting via Gemini…') {
           videoTitle = d.title;
           document.getElementById('preview-label').textContent = d.title;
+        }
+        if (d.model_used) {
+          logLine('✦ Using ' + d.model_used);
         }
         if (d.total_chunks) {
           document.getElementById('chunk-chip').style.display = 'inline-flex';
@@ -1151,14 +1108,18 @@ async function runSingle(url) {
         }
         if (d.done) {
           document.getElementById('preview-body').classList.remove('cursor');
-          document.getElementById('dl-btn').style.display = 'inline-flex';
+          document.getElementById('dl-btn').style.display  = 'inline-flex';
+          document.getElementById('copy-btn').style.display = 'inline-flex';
           stopTimer();
           const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const words   = fullMd.split(/\s+/).filter(Boolean).length;
           showResult({
             title: 'Notes ready!',
-            meta: `${videoTitle} · ${elapsed}s`,
+            meta: `${videoTitle} · ${words.toLocaleString()} words · ${elapsed}s`,
             actions: [
               { label: '⬇ Download PDF', primary: true, fn: downloadPDF },
+              { label: '⎘ Copy Markdown', fn: copyMarkdown },
+              { label: '+ New video', fn: () => { resetUI(); document.getElementById('url-input').value = ''; document.getElementById('url-input').focus(); } },
             ],
           });
         }
@@ -1238,6 +1199,27 @@ async function runPlaylist(url) {
     logLine('❌ ' + e.message, 'err');
   } finally {
     setBusy(false); stopTimer();
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   COPY MARKDOWN
+═══════════════════════════════════════════════════ */
+async function copyMarkdown() {
+  if (!fullMd) return;
+  try {
+    await navigator.clipboard.writeText(fullMd);
+    flash('Markdown copied ✓');
+  } catch {
+    // Fallback for browsers without clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = fullMd;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    flash('Markdown copied ✓');
   }
 }
 
