@@ -18,40 +18,11 @@ from __future__ import annotations
 import logging
 import os
 import re
-import tempfile
 
 import requests
 import yt_dlp
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.proxies import GenericProxyConfig
-from youtube_transcript_api._errors import (
-    NoTranscriptFound,
-    TranscriptsDisabled,
-    VideoUnavailable,
-)
-try:
-    from youtube_transcript_api._errors import RequestBlocked, IpBlocked
-    _BLOCK_ERRORS = (RequestBlocked, IpBlocked)
-except ImportError:
-    _BLOCK_ERRORS = ()
 
 log = logging.getLogger("tubescribe.youtube")
-
-_COOKIES_FILE = os.getenv("YOUTUBE_COOKIES_FILE")
-_COOKIES_TEXT = os.getenv("YOUTUBE_COOKIES")
-
-
-def _cookies_path() -> str | None:
-    if _COOKIES_FILE and os.path.exists(_COOKIES_FILE):
-        return _COOKIES_FILE
-    if _COOKIES_TEXT:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", delete=False, encoding="utf-8"
-        )
-        tmp.write(_COOKIES_TEXT)
-        tmp.close()
-        return tmp.name
-    return None
 
 
 def _video_id(url: str) -> str:
@@ -59,22 +30,6 @@ def _video_id(url: str) -> str:
     if m:
         return m.group(1)
     raise ValueError(f"Cannot extract video ID from URL: {url}")
-
-
-def _get_title(video_id: str, cookies_file: str | None) -> str:
-    """Get title via yt-dlp extract_flat (metadata only, no download)."""
-    opts: dict = {"quiet": True, "skip_download": True, "extract_flat": True}
-    if cookies_file:
-        opts["cookiefile"] = cookies_file
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}", download=False
-            )
-        return info.get("title") or "Untitled Video"
-    except Exception as exc:
-        log.warning("Could not fetch title via yt-dlp: %s", exc)
-        return "Untitled Video"
 
 
 def _fetch_via_worker(worker_url: str, video_id: str) -> tuple[str, list]:
@@ -123,79 +78,22 @@ def _fetch_via_worker(worker_url: str, video_id: str) -> tuple[str, list]:
 
 def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
     """
-    Returns (title, clean_transcript_text).
-    Tries Cloudflare Worker first, then direct youtube-transcript-api.
-    Raises FileNotFoundError / ValueError so pipeline.py can fall through to Gemini.
+    Returns (title, clean_transcript_text) via Cloudflare Worker.
+    Raises on failure — pipeline.py handles the error.
     """
-    video_id    = _video_id(video_url)
-    cookies     = _cookies_path()
-    cookies_tmp = cookies if (_COOKIES_TEXT and cookies != _COOKIES_FILE) else None
+    video_id   = _video_id(video_url)
+    worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
 
-    try:
-        worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
+    if not worker_url:
+        raise RuntimeError("YT_PROXY_WORKER env var not set.")
 
-        # ── Primary: Cloudflare Worker ─────────────────────────────────────
-        if worker_url:
-            log.info("Fetching transcript via Cloudflare Worker for %s", video_id)
-            try:
-                title, segments = _fetch_via_worker(worker_url, video_id)
-                transcript = " ".join(s["text"] for s in segments if s.get("text"))
-                if not transcript.strip():
-                    raise FileNotFoundError("Worker returned empty transcript text")
-                log.info("Worker success: %d words for '%s'", len(transcript.split()), title)
-                return title, transcript
-            except FileNotFoundError:
-                raise  # no captions → tell pipeline to use Gemini
-            except Exception as exc:
-                log.warning("Worker failed: %s — trying direct API", exc)
-                # Fall through to direct API
+    title, segments = _fetch_via_worker(worker_url, video_id)
+    transcript = " ".join(s["text"] for s in segments if s.get("text"))
+    if not transcript.strip():
+        raise FileNotFoundError("Worker returned empty transcript")
 
-        # ── Fallback: direct youtube-transcript-api (local/residential only) ──
-        title  = _get_title(video_id, cookies)
-        proxy  = os.getenv("PROXY_URL", "").strip()
-
-        if proxy:
-            log.info("Using PROXY_URL for transcript fetch")
-            ytt = YouTubeTranscriptApi(
-                proxy_config=GenericProxyConfig(http_url=proxy, https_url=proxy)
-            )
-        else:
-            ytt = YouTubeTranscriptApi()
-
-        try:
-            transcript_list = ytt.list(video_id)
-            try:
-                t = transcript_list.find_manually_created_transcript(["en"])
-            except NoTranscriptFound:
-                t = transcript_list.find_generated_transcript(["en"])
-            fetched = t.fetch()
-        except _BLOCK_ERRORS as exc:
-            raise FileNotFoundError(
-                f"YouTube is blocking requests from this server IP: {exc}"
-            )
-        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable) as exc:
-            raise FileNotFoundError(f"No English transcript for '{title}': {exc}")
-
-        entries = fetched.snippets if hasattr(fetched, "snippets") else fetched
-        seen: dict[str, None] = {}
-        for e in entries:
-            text = (e.text if hasattr(e, "text") else e.get("text", "")).strip().replace("\n", " ")
-            if text:
-                seen[text] = None
-
-        transcript = " ".join(seen.keys())
-        if not transcript:
-            raise ValueError(f"Empty transcript for: {title!r}")
-
-        log.info("Direct API OK: %d words for '%s'", len(transcript.split()), title)
-        return title, transcript
-
-    finally:
-        if cookies_tmp:
-            try:
-                os.remove(cookies_tmp)
-            except OSError:
-                pass
+    log.info("Worker OK: %d words for '%s'", len(transcript.split()), title)
+    return title, transcript
 
 
 def chunk(text: str, word_limit: int = 700) -> list[str]:
