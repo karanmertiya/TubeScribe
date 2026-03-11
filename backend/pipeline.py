@@ -15,8 +15,6 @@ from typing import AsyncGenerator
 
 from backend import analytics
 from backend.llm import LLMConfig, call_llm
-from backend.llm import gemini as gemini_mod
-from backend.llm.config import LLMConfig as _LLMConfig
 from backend.pdf import to_pdf, build_index, merge
 from backend.telegram import send_document
 from backend.youtube import extract, chunk, resolve
@@ -177,57 +175,26 @@ async def run_single_stream(
                         time.sleep(0.2)
 
             else:
-                # No pre-fetched transcript — try Cloudflare Worker first, then Gemini
+                # Fetch transcript via Cloudflare Worker, then use Groq for notes
                 worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
-                title      = prefetched_title or None
-                transcript_text = None
-
-                if worker_url:
-                    # Try the Worker — fast, free, preserves Gemini quota for notes
-                    try:
-                        from backend.youtube.transcript import extract as yt_extract
-                        yield f"data: {json.dumps({'title': 'Fetching transcript via Worker…', 'status': 'fetching'})}\n\n"
-                        title, transcript_text = yt_extract(video_url, "")
-                        yield f"data: {json.dumps({'title': title})}\n\n"
-                        log.info("Worker transcript OK for %s — using Groq for notes", video_url)
-                    except Exception as exc:
-                        log.warning("Worker transcript failed (%s): %s — falling back to Gemini", type(exc).__name__, exc)
-                        yield f"data: {json.dumps({'type': 'log', 'msg': f'⚠ Worker failed: {exc} — using Gemini'})}\n\n"
-                        transcript_text = None
-
-                if transcript_text:
-                    # Worker succeeded — use Groq/configured LLM for notes (faster, no Gemini quota)
-                    chunks = chunk(transcript_text, CHUNK_WORDS)
-                    yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
-                    for i, c in enumerate(chunks, 1):
-                        notes = call_llm(llm, c)
-                        yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                        if len(chunks) > 1:
-                            time.sleep(0.2)
-                else:
-                    # Gemini fallback — processes YouTube URL directly, no IP blocking
-                    gemini_llm = _LLMConfig(
-                        provider="gemini",
-                        api_key=os.getenv("GEMINI_API_KEY", ""),
-                        model="gemini-2.5-flash",
-                        system_prompt=llm.system_prompt,
+                if not worker_url:
+                    raise RuntimeError(
+                        "YT_PROXY_WORKER env var not set. "
+                        "Deploy the Cloudflare Worker and set the URL in Railway env vars."
                     )
-                    yield f"data: {json.dumps({'title': title or 'Processing via Gemini…', 'status': 'fetching'})}\n\n"
-                    title, transcript, model_used = gemini_mod.get_transcript_from_url(gemini_llm, video_url)
-                    yield f"data: {json.dumps({'title': title, 'model_used': model_used})}\n\n"
 
-                    if transcript.startswith("__GEMINI_NOTES__\n"):
-                        notes = transcript[len("__GEMINI_NOTES__\n"):]
-                        yield f"data: {json.dumps({'total_chunks': 1})}\n\n"
-                        yield f"data: {json.dumps({'chunk': notes, 'chunk_index': 1, 'total_chunks': 1})}\n\n"
-                    else:
-                        chunks = chunk(transcript, CHUNK_WORDS)
-                        yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
-                        for i, ch in enumerate(chunks, 1):
-                            notes = call_llm(llm, ch)
-                            yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                            if len(chunks) > 1:
-                                time.sleep(0.2)
+                from backend.youtube.transcript import extract as yt_extract
+                yield f"data: {json.dumps({'title': 'Fetching transcript…', 'status': 'fetching'})}\n\n"
+                title, transcript_text = yt_extract(video_url, "")
+                yield f"data: {json.dumps({'title': title})}\n\n"
+
+                chunks = chunk(transcript_text, CHUNK_WORDS)
+                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+                for i, c in enumerate(chunks, 1):
+                    notes = call_llm(llm, c)
+                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                    if len(chunks) > 1:
+                        time.sleep(0.2)
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
