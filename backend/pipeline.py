@@ -177,36 +177,65 @@ async def run_single_stream(
                         time.sleep(0.2)
 
             else:
-                # No pre-fetched transcript — use Gemini to extract it (bypasses IP blocks)
-                gemini_llm = _LLMConfig(
-                    provider="gemini",
-                    api_key=os.getenv("GEMINI_API_KEY", ""),
-                    model="gemini-2.0-flash",
-                    system_prompt=llm.system_prompt,
-                )
+                # No pre-fetched transcript — try Cloudflare Worker first, then Gemini
+                worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
+                title      = prefetched_title or None
+                transcript_text = None
 
-                yield f"data: {json.dumps({'title': 'Extracting transcript via Gemini…'})}\n\n"
-                title, transcript = gemini_mod.get_transcript_from_url(gemini_llm, video_url)
-                yield f"data: {json.dumps({'title': title})}\n\n"
+                if worker_url:
+                    # Try the Worker — fast, free, preserves Gemini quota for notes
+                    try:
+                        from backend.youtube.transcript import extract as yt_extract
+                        yield f"data: {json.dumps({'title': 'Fetching transcript via Worker…', 'status': 'fetching'})}\n\n"
+                        title, transcript_text = yt_extract(video_url, "")
+                        yield f"data: {json.dumps({'title': title})}\n\n"
+                        log.info("Worker transcript OK for %s — using Groq for notes", video_url)
+                    except Exception as exc:
+                        log.warning("Worker transcript failed: %s — falling back to Gemini", exc)
+                        transcript_text = None
 
-                if transcript.startswith("__GEMINI_NOTES__\n"):
-                    # Gemini already generated notes — emit directly, skip Groq
-                    notes = transcript[len("__GEMINI_NOTES__\n"):]
-                    yield f"data: {json.dumps({'total_chunks': 1})}\n\n"
-                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': 1, 'total_chunks': 1})}\n\n"
-                else:
-                    chunks = chunk(transcript, CHUNK_WORDS)
+                if transcript_text:
+                    # Worker succeeded — use Groq/configured LLM for notes (faster, no Gemini quota)
+                    chunks = chunk(transcript_text, CHUNK_WORDS)
                     yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
-
-                    for i, ch in enumerate(chunks, 1):
-                        notes = call_llm(llm, ch)
+                    for i, c in enumerate(chunks, 1):
+                        notes = call_llm(llm, c)
                         yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
                         if len(chunks) > 1:
                             time.sleep(0.2)
+                else:
+                    # Gemini fallback — processes YouTube URL directly, no IP blocking
+                    gemini_llm = _LLMConfig(
+                        provider="gemini",
+                        api_key=os.getenv("GEMINI_API_KEY", ""),
+                        model="gemini-2.5-flash",
+                        system_prompt=llm.system_prompt,
+                    )
+                    yield f"data: {json.dumps({'title': title or 'Processing via Gemini…', 'status': 'fetching'})}\n\n"
+                    title, transcript, model_used = gemini_mod.get_transcript_from_url(gemini_llm, video_url)
+                    yield f"data: {json.dumps({'title': title, 'model_used': model_used})}\n\n"
+
+                    if transcript.startswith("__GEMINI_NOTES__\n"):
+                        notes = transcript[len("__GEMINI_NOTES__\n"):]
+                        yield f"data: {json.dumps({'total_chunks': 1})}\n\n"
+                        yield f"data: {json.dumps({'chunk': notes, 'chunk_index': 1, 'total_chunks': 1})}\n\n"
+                    else:
+                        chunks = chunk(transcript, CHUNK_WORDS)
+                        yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+                        for i, ch in enumerate(chunks, 1):
+                            notes = call_llm(llm, ch)
+                            yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                            if len(chunks) > 1:
+                                time.sleep(0.2)
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
             yield f"data: {json.dumps({'done': True})}\n\n"
 
         except Exception as exc:
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            msg = str(exc)
+            # Strip raw API error blobs — show the clean message we wrote in gemini.py
+            # If it's still a raw API error, give a generic helpful message
+            if "{'error'" in msg or '"error"' in msg:
+                msg = "Gemini API error — this video may be unavailable or restricted."
+            yield f"data: {json.dumps({'error': msg})}\n\n"
