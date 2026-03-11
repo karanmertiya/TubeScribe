@@ -1093,6 +1093,9 @@ async function runSingle(url) {
         if (d.model_used) {
           logLine('✦ Using ' + d.model_used);
         }
+        if (d.type === 'log') {
+          logLine(d.msg, d.msg.startsWith('⚠') ? 'warn' : '');
+        }
         if (d.total_chunks) {
           document.getElementById('chunk-chip').style.display = 'inline-flex';
           document.getElementById('chunk-label').textContent = `0/${d.total_chunks}`;

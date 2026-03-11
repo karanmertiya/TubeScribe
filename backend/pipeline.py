@@ -191,7 +191,8 @@ async def run_single_stream(
                         yield f"data: {json.dumps({'title': title})}\n\n"
                         log.info("Worker transcript OK for %s — using Groq for notes", video_url)
                     except Exception as exc:
-                        log.warning("Worker transcript failed: %s — falling back to Gemini", exc)
+                        log.warning("Worker transcript failed (%s): %s — falling back to Gemini", type(exc).__name__, exc)
+                        yield f"data: {json.dumps({'type': 'log', 'msg': f'⚠ Worker failed: {exc} — using Gemini'})}\n\n"
                         transcript_text = None
 
                 if transcript_text:
