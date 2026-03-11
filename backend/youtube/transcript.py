@@ -1,8 +1,18 @@
 """
 Fetch transcripts from YouTube.
-Primary: Cloudflare Worker API (YT_PROXY_WORKER env var) — not IP-blocked.
-Fallback: direct youtube-transcript-api (works locally, blocked on cloud IPs).
-yt-dlp used only for video title via extract_flat (no format/download).
+
+Strategy (in order):
+  1. Cloudflare Worker (YT_PROXY_WORKER env var)
+     — Custom worker that dynamically extracts INNERTUBE_API_KEY from the
+       YouTube page and calls the Android player API. Cloudflare edge IPs
+       are not blocked by YouTube unlike AWS/GCP datacenter IPs.
+     — Returns title + full transcript text in ~1-2s.
+
+  2. Direct youtube-transcript-api (works only locally / residential IPs)
+     — Included as fallback for local dev. Will fail on Railway.
+
+  If both fail, pipeline.py falls through to Gemini which processes the
+  YouTube URL directly — always works but uses daily quota.
 """
 from __future__ import annotations
 import logging
@@ -52,6 +62,7 @@ def _video_id(url: str) -> str:
 
 
 def _get_title(video_id: str, cookies_file: str | None) -> str:
+    """Get title via yt-dlp extract_flat (metadata only, no download)."""
     opts: dict = {"quiet": True, "skip_download": True, "extract_flat": True}
     if cookies_file:
         opts["cookiefile"] = cookies_file
@@ -62,135 +73,122 @@ def _get_title(video_id: str, cookies_file: str | None) -> str:
             )
         return info.get("title") or "Untitled Video"
     except Exception as exc:
-        log.warning("Could not fetch title: %s", exc)
+        log.warning("Could not fetch title via yt-dlp: %s", exc)
         return "Untitled Video"
 
 
-def _fetch_via_worker(worker_url: str, video_id: str) -> list:
+def _fetch_via_worker(worker_url: str, video_id: str) -> tuple[str, list]:
     """
-    Fetch transcript using YouTube's internal youtubei/v1/player API via Worker.
-    This bypasses the page-scraping approach entirely — no captionTracks regex needed.
-    Uses the Android client which returns full caption data without auth.
+    Call our Cloudflare Worker which:
+      1. Fetches the YouTube page to extract the dynamic INNERTUBE_API_KEY
+      2. Calls YouTube's Android player API with that key + visitor data
+      3. Fetches caption JSON and returns clean segments
+
+    Returns (title, segments) where segments is [{text, offset, duration}]
+    Raises FileNotFoundError if no captions available.
+    Raises requests.HTTPError for other failures.
     """
-    import json
-    WORKER = worker_url.rstrip("/") + "?url="
+    base = worker_url.rstrip("/")
 
-    # Step 1: POST to youtubei player API via Worker
-    player_api = "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
-    payload = json.dumps({
-        "videoId": video_id,
-        "context": {
-            "client": {
-                "clientName": "ANDROID",
-                "clientVersion": "19.09.37",
-                "androidSdkVersion": 30,
-                "hl": "en",
-                "gl": "US",
-            }
-        }
-    })
-
-    resp = requests.post(
-        WORKER + requests.utils.quote(player_api, safe=""),
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        timeout=20,
+    # New worker endpoint: GET /?video_id=XXXX
+    resp = requests.get(
+        f"{base}/?video_id={video_id}",
+        timeout=30,
     )
-    if not resp.ok:
-        raise FileNotFoundError(f"Worker/player API error: {resp.status_code} {resp.text[:200]}")
+
+    if resp.status_code == 404:
+        raise FileNotFoundError(f"No captions available for video {video_id}")
+    if resp.status_code == 400:
+        data = resp.json()
+        raise ValueError(data.get("error", f"Bad request: {resp.text[:200]}"))
+    resp.raise_for_status()
 
     data = resp.json()
 
-    # Step 2: extract captionTracks from player response
-    try:
-        tracks = data["captions"]["playerCaptionsTracklistRenderer"]["captionTracks"]
-    except (KeyError, TypeError):
-        raise FileNotFoundError("No captions available for this video.")
+    if "error" in data:
+        raise FileNotFoundError(data["error"])
 
-    track = (
-        next((t for t in tracks if t.get("languageCode") == "en" and not t.get("kind")), None)
-        or next((t for t in tracks if t.get("languageCode") == "en"), None)
-        or (tracks[0] if tracks else None)
+    segments = data.get("segments") or []
+    title    = data.get("title") or "Untitled Video"
+
+    if not segments:
+        raise FileNotFoundError("Worker returned empty transcript")
+
+    log.info(
+        "Worker transcript OK: %d words, title=%r",
+        data.get("word_count", 0), title
     )
-    if not track:
-        raise FileNotFoundError("No English captions found for this video.")
-
-    # Step 3: fetch transcript JSON via Worker
-    timedtext_url = track["baseUrl"] + "&fmt=json3"
-    tresp = requests.get(
-        WORKER + requests.utils.quote(timedtext_url, safe=""),
-        timeout=15,
-    )
-    if not tresp.ok:
-        raise FileNotFoundError(f"Worker failed to fetch timedtext: {tresp.status_code}")
-
-    events = tresp.json().get("events", [])
-    result = []
-    for ev in events:
-        if not ev.get("segs"):
-            continue
-        text = "".join(s.get("utf8", "") for s in ev["segs"]).replace("\n", " ").strip()
-        if text:
-            result.append({"text": text})
-    return result
+    return title, segments
 
 
 def extract(video_url: str, temp_dir: str) -> tuple[str, str]:
-    """Returns (title, clean_transcript)."""
+    """
+    Returns (title, clean_transcript_text).
+    Tries Cloudflare Worker first, then direct youtube-transcript-api.
+    Raises FileNotFoundError / ValueError so pipeline.py can fall through to Gemini.
+    """
     video_id    = _video_id(video_url)
     cookies     = _cookies_path()
     cookies_tmp = cookies if (_COOKIES_TEXT and cookies != _COOKIES_FILE) else None
 
     try:
-        title      = _get_title(video_id, cookies)
         worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
-        proxy_url  = os.getenv("PROXY_URL", "").strip()
 
+        # ── Primary: Cloudflare Worker ─────────────────────────────────────
         if worker_url:
-            log.warning("Fetching transcript via Cloudflare Worker for %s", video_id)
-            raw_entries = _fetch_via_worker(worker_url, video_id)
-        else:
-            if proxy_url:
-                log.warning("Using PROXY_URL for transcript fetch")
-                ytt = YouTubeTranscriptApi(
-                    proxy_config=GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
-                )
-            else:
-                ytt = YouTubeTranscriptApi()
+            log.info("Fetching transcript via Cloudflare Worker for %s", video_id)
             try:
-                transcript_list = ytt.list(video_id)
-                try:
-                    t = transcript_list.find_manually_created_transcript(["en"])
-                except NoTranscriptFound:
-                    t = transcript_list.find_generated_transcript(["en"])
-                fetched = t.fetch()
-            except _BLOCK_ERRORS as exc:  # type: ignore
-                raise FileNotFoundError(
-                    "YouTube is blocking transcript requests from this server IP. "
-                    f"Details: {exc}"
-                )
-            except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable) as exc:
-                raise FileNotFoundError(f"No English transcript for '{title}': {exc}")
+                title, segments = _fetch_via_worker(worker_url, video_id)
+                transcript = " ".join(s["text"] for s in segments if s.get("text"))
+                if not transcript.strip():
+                    raise FileNotFoundError("Worker returned empty transcript text")
+                log.info("Worker success: %d words for '%s'", len(transcript.split()), title)
+                return title, transcript
+            except FileNotFoundError:
+                raise  # no captions → tell pipeline to use Gemini
+            except Exception as exc:
+                log.warning("Worker failed: %s — trying direct API", exc)
+                # Fall through to direct API
 
-            entries = fetched.snippets if hasattr(fetched, "snippets") else fetched
-            raw_entries = [
-                {"text": (e.text if hasattr(e, "text") else e.get("text", ""))}
-                for e in entries
-            ]
+        # ── Fallback: direct youtube-transcript-api (local/residential only) ──
+        title  = _get_title(video_id, cookies)
+        proxy  = os.getenv("PROXY_URL", "").strip()
 
-        # Deduplicate
+        if proxy:
+            log.info("Using PROXY_URL for transcript fetch")
+            ytt = YouTubeTranscriptApi(
+                proxy_config=GenericProxyConfig(http_url=proxy, https_url=proxy)
+            )
+        else:
+            ytt = YouTubeTranscriptApi()
+
+        try:
+            transcript_list = ytt.list(video_id)
+            try:
+                t = transcript_list.find_manually_created_transcript(["en"])
+            except NoTranscriptFound:
+                t = transcript_list.find_generated_transcript(["en"])
+            fetched = t.fetch()
+        except _BLOCK_ERRORS as exc:
+            raise FileNotFoundError(
+                f"YouTube is blocking requests from this server IP: {exc}"
+            )
+        except (NoTranscriptFound, TranscriptsDisabled, VideoUnavailable) as exc:
+            raise FileNotFoundError(f"No English transcript for '{title}': {exc}")
+
+        entries = fetched.snippets if hasattr(fetched, "snippets") else fetched
         seen: dict[str, None] = {}
-        for entry in raw_entries:
-            text = entry.get("text", "").strip().replace("\n", " ")
+        for e in entries:
+            text = (e.text if hasattr(e, "text") else e.get("text", "")).strip().replace("\n", " ")
             if text:
                 seen[text] = None
 
-        transcript_text = " ".join(seen.keys())
-        if not transcript_text:
+        transcript = " ".join(seen.keys())
+        if not transcript:
             raise ValueError(f"Empty transcript for: {title!r}")
 
-        log.warning("Transcript OK: %d words for '%s'", len(transcript_text.split()), title)
-        return title, transcript_text
+        log.info("Direct API OK: %d words for '%s'", len(transcript.split()), title)
+        return title, transcript
 
     finally:
         if cookies_tmp:
