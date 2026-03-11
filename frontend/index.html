@@ -1065,7 +1065,7 @@ async function runSingle(url) {
     }
   } catch(_) {}
 
-  logLine('🤖 Sending to Gemini for processing…');
+  logLine('🔍 Fetching transcript…');
 
   try {
     const res = await fetch(`${API}/stream-notes`, {
