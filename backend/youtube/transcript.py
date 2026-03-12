@@ -51,17 +51,12 @@ def _fetch_via_worker(worker_url: str, video_id: str) -> tuple[str, list]:
         timeout=30,
     )
 
-    if resp.status_code == 404:
-        raise FileNotFoundError(f"No captions available for video {video_id}")
-    if resp.status_code == 400:
-        data = resp.json()
-        raise ValueError(data.get("error", f"Bad request: {resp.text[:200]}"))
-    if resp.status_code == 500:
+    if resp.status_code in (404, 500):
         try:
             msg = resp.json().get("error", resp.text[:300])
         except Exception:
             msg = resp.text[:300]
-        raise FileNotFoundError(f"Worker error: {msg}")
+        raise FileNotFoundError(f"Worker: {msg}")
     resp.raise_for_status()
 
     data = resp.json()
