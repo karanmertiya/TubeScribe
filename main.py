@@ -286,6 +286,52 @@ async def markdown_to_pdf(request: Request):
 
 
 
+# ── Bookmarklet receiver ───────────────────────────────────────────────────────
+
+@app.post("/from-browser", tags=["Pipeline"], include_in_schema=False)
+async def from_browser(request: Request):
+    """
+    Receives transcript POSTed by the TubeScribe bookmarklet.
+    Renders the main UI with transcript pre-loaded so processing starts immediately.
+    """
+    form        = await request.form()
+    title       = (form.get("title") or "Untitled Video").strip()
+    video_id    = (form.get("video_id") or "").strip()
+    transcript  = (form.get("transcript") or "").strip()
+
+    if not transcript:
+        return JSONResponse({"error": "No transcript received"}, status_code=400)
+
+    # Serve the main index.html but with transcript injected as a script tag
+    # so the page auto-starts processing on load
+    import html as html_mod
+    html_path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
+    with open(html_path, encoding="utf-8") as f:
+        page = f.read()
+
+    inject = f"""
+<script>
+window._tubescribeAutostart = {{
+  title: {json.dumps(title)},
+  videoId: {json.dumps(video_id)},
+  transcript: {json.dumps(transcript)}
+}};
+</script>"""
+
+    page = page.replace("</head>", inject + "\n</head>", 1)
+    return RawResponse(content=page.encode(), media_type="text/html")
+
+
+@app.get("/setup", tags=["System"], include_in_schema=False)
+async def setup_page(request: Request):
+    """Bookmarklet setup page."""
+    html_path = os.path.join(os.path.dirname(__file__), "frontend", "setup.html")
+    if os.path.exists(html_path):
+        with open(html_path, encoding="utf-8") as f:
+            return RawResponse(content=f.read().encode(), media_type="text/html")
+    return JSONResponse({"error": "Setup page not found"}, status_code=404)
+
+
 # ── Telegram Webhook (developer's bot only) ───────────────────────────────────
 
 @app.post("/webhook/telegram", include_in_schema=False)
