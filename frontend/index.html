@@ -1041,14 +1041,107 @@ function go() {
   inputMode === 'playlist' ? runPlaylist(url) : runSingle(url);
 }
 
+// ── Bookmarklet autostart ─────────────────────────────────────────────────────
+// When /from-browser POSTs transcript, the server injects window._tubescribeAutostart
+// We pick it up here and skip straight to note generation
+window.addEventListener('DOMContentLoaded', () => {
+  const auto = window._tubescribeAutostart;
+  if (!auto?.transcript) return;
+
+  // Pre-fill the URL input with a fake YouTube URL so the UI looks right
+  const urlInput = document.getElementById('url-input');
+  if (urlInput && auto.videoId) {
+    urlInput.value = `https://www.youtube.com/watch?v=${auto.videoId}`;
+  }
+
+  // Small delay so the UI renders first
+  setTimeout(() => {
+    resetUI(); setBusy(true); startTimer();
+    runSingleWithTranscript(auto.title, auto.transcript);
+  }, 300);
+});
+
 /* ═══════════════════════════════════════════════════
    TRANSCRIPT FETCH (browser-side, avoids server IP block)
 ═══════════════════════════════════════════════════ */
 
 
 /* ═══════════════════════════════════════════════════
-   SINGLE VIDEO
+   SINGLE VIDEO (with pre-fetched transcript from bookmarklet)
 ═══════════════════════════════════════════════════ */
+async function runSingleWithTranscript(title, transcript) {
+  show('preview-panel');
+  videoTitle = title;
+  document.getElementById('preview-label').textContent = title;
+  logLine('📋 Transcript received from browser (' + transcript.split(/\s+/).length.toLocaleString() + ' words)');
+  logLine('🤖 Generating notes with Groq…');
+
+  let body;
+  try {
+    body = buildBody({
+      url: document.getElementById('url-input').value.trim() || 'https://www.youtube.com/',
+      prefetched_title: title,
+      prefetched_transcript: transcript,
+    }, false);
+  } catch(e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
+
+  try {
+    const res = await fetch(`${API}/stream-notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Server ${res.status}`);
+    const reader = res.body.getReader();
+    const dec    = new TextDecoder();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      for (const line of dec.decode(value).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        let d; try { d = JSON.parse(line.slice(6)); } catch { continue; }
+        if (d.total_chunks) {
+          document.getElementById('chunk-chip').style.display = 'inline-flex';
+          document.getElementById('chunk-label').textContent = `0/${d.total_chunks}`;
+        }
+        if (d.chunk) {
+          fullMd += d.chunk;
+          document.getElementById('preview-body').innerHTML = marked.parse(fullMd);
+          document.getElementById('preview-body').scrollTop = 99999;
+          if (d.chunk_index && d.total_chunks) {
+            document.getElementById('chunk-label').textContent = `${d.chunk_index}/${d.total_chunks}`;
+            setProgress(d.chunk_index / d.total_chunks * 100);
+          }
+        }
+        if (d.done) {
+          document.getElementById('preview-body').classList.remove('cursor');
+          document.getElementById('dl-btn').style.display  = 'inline-flex';
+          document.getElementById('copy-btn').style.display = 'inline-flex';
+          stopTimer();
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          const words   = fullMd.split(/\s+/).filter(Boolean).length;
+          showResult({
+            title: 'Notes ready!',
+            meta: `${videoTitle} · ${words.toLocaleString()} words · ${elapsed}s`,
+            actions: [
+              { label: '⬇ Download PDF', primary: true, fn: downloadPDF },
+              { label: '⎘ Copy Markdown', fn: copyMarkdown },
+              { label: '+ New video', fn: () => { resetUI(); document.getElementById('url-input').value=''; document.getElementById('url-input').focus(); }},
+            ],
+          });
+        }
+        if (d.error) throw new Error(d.error);
+      }
+    }
+  } catch(e) {
+    logLine('❌ ' + e.message, 'error');
+  } finally {
+    setBusy(false); stopTimer();
+  }
+}
+
+
 async function runSingle(url) {
   show('preview-panel');
   let body;
