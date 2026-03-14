@@ -322,6 +322,19 @@ window._tubescribeAutostart = {{
     return RawResponse(content=page.encode(), media_type="text/html")
 
 
+@app.get("/debug-paths", include_in_schema=False)
+async def debug_paths():
+    import glob
+    base = os.path.dirname(__file__)
+    frontend = os.path.join(base, "frontend")
+    return {
+        "__file__": __file__,
+        "base": base,
+        "frontend_dir_exists": os.path.exists(frontend),
+        "frontend_files": glob.glob(os.path.join(frontend, "*")) if os.path.exists(frontend) else [],
+        "setup_exists": os.path.exists(os.path.join(frontend, "setup.html")),
+    }
+
 @app.get("/setup", tags=["System"], include_in_schema=False)
 async def setup_page(request: Request):
     """Bookmarklet setup page."""
