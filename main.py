@@ -228,17 +228,20 @@ async def stream_notes(request: Request):
     """Single-video SSE stream — returns markdown chunks in real-time."""
     body = await request.json()
     url  = (body.get("url") or "").strip()
-    if not url:
+    pre_title      = (body.get("title") or body.get("prefetched_title") or "").strip() or None
+    pre_transcript = (body.get("transcript") or body.get("prefetched_transcript") or "").strip() or None
+
+    if not url and not pre_transcript:
         return JSONResponse({"error": "url is required"}, status_code=400)
+    if not url:
+        url = f"https://www.youtube.com/watch?v={body.get('video_id', '')}"
 
     dev = is_dev(request)
     llm, err = _resolve_llm_single(body, dev)
     if err:
         return err
 
-    session    = request.cookies.get("session", "")
-    pre_title  = (body.get("title") or "").strip() or None
-    pre_transcript = (body.get("transcript") or "").strip() or None
+    session = request.cookies.get("session", "")
     return StreamingResponse(
         run_single_stream(url, llm, dev, session,
                           prefetched_title=pre_title,
