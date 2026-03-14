@@ -303,12 +303,12 @@ async def from_browser(request: Request):
     if not transcript:
         return JSONResponse({"error": "No transcript received"}, status_code=400)
 
-    # Serve the main index.html but with transcript injected as a script tag
-    html_path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
-    with open(html_path, encoding="utf-8") as f:
-        page = f.read()
+    try:
+        html_path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
+        with open(html_path, encoding="utf-8") as f:
+            page = f.read()
 
-    inject = f"""
+        inject = f"""
 <script>
 window._tubescribeAutostart = {{
   title: {json.dumps(title)},
@@ -317,8 +317,11 @@ window._tubescribeAutostart = {{
 }};
 </script>"""
 
-    page = page.replace("</head>", inject + "\n</head>", 1)
-    return RawResponse(content=page.encode(), media_type="text/html")
+        page = page.replace("</head>", inject + "\n</head>", 1)
+        return RawResponse(content=page.encode(), media_type="text/html")
+    except Exception as exc:
+        import traceback
+        return JSONResponse({"error": str(exc), "trace": traceback.format_exc()}, status_code=500)
 
 
 @app.get("/debug-paths", include_in_schema=False)
