@@ -327,8 +327,7 @@ async def setup_page(request: Request):
     """Bookmarklet setup page."""
     html_path = os.path.join(os.path.dirname(__file__), "frontend", "setup.html")
     if os.path.exists(html_path):
-        with open(html_path, encoding="utf-8") as f:
-            return RawResponse(content=f.read().encode(), media_type="text/html")
+        return FileResponse(html_path, media_type="text/html")
     return JSONResponse({"error": "Setup page not found"}, status_code=404)
 
 
