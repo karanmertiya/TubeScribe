@@ -79,7 +79,7 @@ RUN fc-cache -f -v > /dev/null 2>&1
 # Application code
 COPY main.py              ./main.py
 COPY backend/             ./backend/
-COPY frontend/index.html  ./frontend/index.html
+COPY frontend/             ./frontend/
 
 # Data directory for analytics DB (mount a volume here in prod)
 RUN mkdir -p /data && chmod 777 /data
