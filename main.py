@@ -11,6 +11,7 @@ Deploy:
 """
 from __future__ import annotations
 import datetime
+import json
 import logging
 import os
 import re
@@ -303,8 +304,6 @@ async def from_browser(request: Request):
         return JSONResponse({"error": "No transcript received"}, status_code=400)
 
     # Serve the main index.html but with transcript injected as a script tag
-    # so the page auto-starts processing on load
-    import html as html_mod
     html_path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
     with open(html_path, encoding="utf-8") as f:
         page = f.read()
