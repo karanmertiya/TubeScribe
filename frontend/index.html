@@ -1079,7 +1079,8 @@ async function runSingleWithTranscript(title, transcript) {
   let body;
   try {
     body = buildBody({
-      url: document.getElementById('url-input').value.trim() || 'https://www.youtube.com/',
+      url: `https://www.youtube.com/watch?v=${videoId || 'unknown'}`,
+      video_id: videoId,
       prefetched_title: title,
       prefetched_transcript: transcript,
     }, false);
