@@ -1057,7 +1057,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // Small delay so the UI renders first
   setTimeout(() => {
     resetUI(); setBusy(true); startTimer();
-    runSingleWithTranscript(auto.title, auto.transcript);
+    runSingleWithTranscript(auto.title, auto.transcript, auto.videoId);
   }, 300);
 });
 
@@ -1069,7 +1069,7 @@ window.addEventListener('DOMContentLoaded', () => {
 /* ═══════════════════════════════════════════════════
    SINGLE VIDEO (with pre-fetched transcript from bookmarklet)
 ═══════════════════════════════════════════════════ */
-async function runSingleWithTranscript(title, transcript) {
+async function runSingleWithTranscript(title, transcript, videoId) {
   show('preview-panel');
   videoTitle = title;
   document.getElementById('preview-label').textContent = title;
