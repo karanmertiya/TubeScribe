@@ -110,25 +110,43 @@ def _safe(s: str) -> str:
     return re.sub(r"[<>&\"']", "", s)
 
 
+def _fix_pipes(md: str) -> str:
+    """
+    Escape | characters used as absolute value notation so markdown2's
+    table parser doesn't treat them as table cell separators.
+    Pattern: |expr| where expr contains no newlines — e.g. |10 - 20| or |height[i]|
+    """
+    # Escape pipes that appear mid-line (not at start of line — those are legit table rows)
+    lines = md.splitlines()
+    result = []
+    for line in lines:
+        stripped = line.lstrip()
+        # Skip actual table rows (start with |) and table separator rows (---|)
+        if stripped.startswith('|') or re.match(r'^\s*\|?[-:]+\|', line):
+            result.append(line)
+            continue
+        # Escape all | that are NOT at the start of the line
+        # These are absolute value pipes mid-sentence
+        if '|' in stripped:
+            line = re.sub(r'\|', r'\\|', line)
+        result.append(line)
+    return '\n'.join(result)
+
+
 def _fix_inline_lists(md: str) -> str:
     """
-    Fix two LLM formatting habits that break Markdown list rendering:
+    Fix LLM formatting habits that break Markdown list rendering:
 
-    1. Inline dash lists on one line:
-         'We have: - item1 - item2 - item3'
-       becomes:
-         'We have:\n- item1\n- item2\n- item3'
-
-    2. Inline asterisk lists like '* item one * item two':
-       becomes:
-         '- item one\n- item two'
+    1. Inline asterisk lists: '* item one * item two'
+    2. Inline dash lists after colon: 'Topics: - item1 - item2'
+    3. Inline dash lists with period separator: 'text. - item1 . - item2'
+    4. Multiple inline dashes: 'text - item - item'
     """
     lines = md.splitlines()
     result = []
 
     for line in lines:
-        # Pattern 1: inline asterisk list  (* item * item)
-        # Guard against bold/italic (**text** or *italic*) by requiring space after *
+        # Pattern 1: inline asterisk list (* item * item)
         if re.search(r'(?<!\*)\* \S.+(?<!\*)\* \S', line):
             m = re.match(r'^(.*?)\s*(?<!\*)\*\s+(.+)$', line)
             if m:
@@ -143,12 +161,38 @@ def _fix_inline_lists(md: str) -> str:
                         result.append(f'- {item}')
                 continue
 
-        # Pattern 2: inline dash list after colon OR multiple inline dashes
-        # Catches: "Topics: - Recursion - Tabulation - Space Optimization"
-        # Catches: "text - item1 - item2 - item3"
-        has_colon_list = bool(re.search(r':\s+-\s+\S', line))
-        has_multi_dash = len(re.findall(r'\s-\s', line)) >= 2
-        if has_colon_list or has_multi_dash:
+        # Pattern 2 & 3: inline dash lists
+        # Detect: "text: - item - item" OR "text. - item . - item" OR "text - item - item"
+        has_colon_list  = bool(re.search(r':\s+-\s+\S', line))
+        has_dot_list    = bool(re.search(r'\.\s+-\s+\S.+\.\s+-\s+', line))
+        has_multi_dash  = len(re.findall(r'(?<!\w)-\s+\w', line)) >= 2 and ' - ' in line
+
+        if has_colon_list or has_dot_list or has_multi_dash:
+            # Split on ". -" first (period-dash separator)
+            if has_dot_list and '. -' in line:
+                parts = re.split(r'\s*\.\s*-\s*', line)
+                # First part may end with text, rest are items
+                prefix_part = parts[0].rstrip('. ')
+                all_items = parts[1:] if len(parts) > 1 else []
+                # Check if prefix itself has a colon list
+                if ': -' in prefix_part:
+                    colon_pos = prefix_part.find(': -')
+                    actual_prefix = prefix_part[:colon_pos + 1]
+                    first_item = prefix_part[colon_pos + 2:].strip().lstrip('- ').strip()
+                    if actual_prefix:
+                        result.append(actual_prefix)
+                    if first_item:
+                        result.append(f'- {first_item}')
+                else:
+                    if prefix_part:
+                        result.append(prefix_part + '.')
+                for item in all_items:
+                    item = item.strip().rstrip('.').strip()
+                    if item:
+                        result.append(f'- {item}')
+                continue
+
+            # Colon-prefixed list: "text: - item1 - item2"
             colon_pos = line.find(': -') if has_colon_list else -1
             if colon_pos != -1:
                 prefix = line[:colon_pos + 1].rstrip()
@@ -178,7 +222,7 @@ def to_pdf(title: str, md_content: str, provider_label: str = "") -> bytes:
     """Render a titled Markdown document to PDF bytes."""
     ts   = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     body = markdown2.markdown(
-        _fix_inline_lists(md_content),
+        _fix_pipes(_fix_inline_lists(md_content)),
         extras=["fenced-code-blocks", "tables", "footnotes", "strike", "task_list"],
     )
     meta = f"Generated: {ts}" + (f" &nbsp;|&nbsp; {provider_label}" if provider_label else "")
