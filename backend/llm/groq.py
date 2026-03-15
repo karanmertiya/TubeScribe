@@ -8,8 +8,8 @@ import requests as _requests
 
 from .config import LLMConfig
 
-log       = logging.getLogger("tubescribe.llm.groq")
-RETRY_WAIT = int(os.getenv("GROQ_RETRY_WAIT", "15"))
+log        = logging.getLogger("tubescribe.llm.groq")
+MAX_TRIES  = int(os.getenv("GROQ_MAX_RETRIES", "6"))
 
 
 def call(llm: LLMConfig, prompt: str) -> str:
@@ -26,7 +26,7 @@ def call(llm: LLMConfig, prompt: str) -> str:
         "temperature": 0.3,
     }
 
-    for attempt in range(3):
+    for attempt in range(MAX_TRIES):
         try:
             r = _requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -36,16 +36,27 @@ def call(llm: LLMConfig, prompt: str) -> str:
             return r.json()["choices"][0]["message"]["content"]
 
         except _requests.HTTPError as exc:
-            if exc.response.status_code == 429:
-                wait = RETRY_WAIT * (attempt + 1)
-                log.warning("Rate-limit — waiting %ds (attempt %d/3)", wait, attempt + 1)
+            status = exc.response.status_code
+            if status == 429:
+                # Try to read Retry-After header first, then use exponential backoff
+                retry_after = exc.response.headers.get("Retry-After")
+                if retry_after:
+                    wait = int(retry_after) + 2
+                else:
+                    # Exponential: 20, 40, 60, 80, 100, 120
+                    wait = min(20 * (attempt + 1), 120)
+                log.warning("Rate-limit 429 — waiting %ds (attempt %d/%d)", wait, attempt + 1, MAX_TRIES)
                 time.sleep(wait)
+                continue
             else:
-                log.error("Groq HTTP %s: %s", exc.response.status_code, exc.response.text[:200])
-                return f"\n\n> ⚠️ **Groq Error {exc.response.status_code}**\n\n"
+                log.error("Groq HTTP %s: %s", status, exc.response.text[:200])
+                return f"\n\n> \u26a0\ufe0f **Groq Error {status}**\n\n"
 
         except Exception as exc:
             log.error("Groq error: %s", exc)
-            return f"\n\n> ⚠️ **Groq Error:** {exc}\n\n"
+            if attempt < MAX_TRIES - 1:
+                time.sleep(10)
+                continue
+            return f"\n\n> \u26a0\ufe0f **Groq Error:** {exc}\n\n"
 
-    return "\n\n> ❌ **Groq failed after 3 retries.**\n\n"
+    return f"\n\n> \u274c **Groq failed after {MAX_TRIES} retries. Try again in a minute.**\n\n"
