@@ -139,7 +139,32 @@
         : track.baseUrl + '&fmt=json3';
       var res = await fetch(url);
       if (res.ok) {
-        var data = await res.json();
+        var text = await res.text();
+        var data;
+        try {
+          data = JSON.parse(text);
+        } catch(e) {
+          // JSON3 truncated — fall back to XML format
+          log('JSON3 truncated, trying XML\u2026');
+          var xmlUrl = track.baseUrl.includes('fmt=')
+            ? track.baseUrl.replace(/fmt=[^&]+/, '')
+            : track.baseUrl;
+          var xmlRes = await fetch(xmlUrl);
+          if (!xmlRes.ok) throw new Error('Caption fetch failed: ' + xmlRes.status);
+          var xml = await xmlRes.text();
+          var segs = [];
+          var seen = new Set();
+          var matches = xml.match(/<text[^>]*>([^<]+)<\/text>/g) || [];
+          matches.forEach(function(m) {
+            var t = m.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#39;/g,"'").replace(/&quot;/g,'"').replace(/\n/g,' ').trim();
+            if (t && !seen.has(t)) { seen.add(t); segs.push(t); }
+          });
+          if (segs.length > 5) {
+            log('\u2713 ' + segs.length + ' segments from XML');
+            return segs.join(' ');
+          }
+          throw new Error('Both JSON3 and XML caption formats failed');
+        }
         var seen = new Set(), segs = [];
         (data.events || []).forEach(function(ev) {
           if (!ev.segs) return;
