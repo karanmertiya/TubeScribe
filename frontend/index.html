@@ -3,1393 +3,319 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TubeScribe</title>
+<title>TubeScribe — YouTube to PDF Notes</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Serif+Display:ital@0;1&display=swap" rel="stylesheet">
 <style>
-/* ══════════════════════════════════════════════════
-   DESIGN TOKENS
-══════════════════════════════════════════════════ */
-:root {
-  --bg:         #07090f;
-  --surface:    #0d1117;
-  --surface2:   #131a24;
-  --surface3:   #1a2332;
-  --border:     #1e2d45;
-  --border2:    #28405e;
-  --text:       #e6edf5;
-  --text-dim:   #7d8fa8;
-  --text-faint: #38506a;
-
-  /* Dev accent = amber */
-  --dev:        #f59e0b;
-  --dev-dim:    rgba(245,158,11,0.12);
-  --dev-border: rgba(245,158,11,0.3);
-
-  /* User accent = blue */
-  --user:       #3b82f6;
-  --user-dim:   rgba(59,130,246,0.1);
-  --user-border: rgba(59,130,246,0.25);
-
-  --green:      #06d6a0;
-  --green-dim:  rgba(6,214,160,0.1);
-  --red:        #ef4444;
-  --purple:     #8b5cf6;
-
-  --radius:     10px;
-  --transition: 0.18s ease;
-}
-
-/* ══════════════════════════════════════════════════
-   RESET
-══════════════════════════════════════════════════ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { scroll-behavior: smooth; }
+
+:root {
+  --bg:       #07090f;
+  --surface:  #0d1117;
+  --surface2: #131a24;
+  --border:   #1e2d45;
+  --text:     #e6edf5;
+  --dim:      #7d8fa8;
+  --accent:   #6c63ff;
+  --accent2:  #a78bfa;
+}
 
 body {
-  font-family: 'Syne', sans-serif;
   background: var(--bg);
   color: var(--text);
+  font-family: 'Syne', -apple-system, sans-serif;
   min-height: 100vh;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-/* subtle noise texture */
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  background:
-    radial-gradient(ellipse 80% 40% at 15% 0%,   rgba(59,130,246,0.06) 0%, transparent 55%),
-    radial-gradient(ellipse 60% 35% at 85% 100%,  rgba(245,158,11,0.04) 0%, transparent 55%);
-  pointer-events: none; z-index: 0;
-}
-
-/* ══════════════════════════════════════════════════
-   LAYOUT
-══════════════════════════════════════════════════ */
-.app { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 0 24px 80px; }
-
-/* ══════════════════════════════════════════════════
-   TOP BAR
-══════════════════════════════════════════════════ */
-.topbar {
+/* ── Nav ── */
+nav {
+  padding: 20px 40px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 0 0;
+  border-bottom: 1px solid var(--border);
 }
-
 .logo {
-  font-family: 'DM Serif Display', serif;
-  font-size: 20px;
-  letter-spacing: -0.01em;
-  color: var(--text);
+  font-size: 1.3rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
-
-.logo span { color: var(--user); }
-
-.topbar-right { display: flex; align-items: center; gap: 10px; }
-
-/* Mode badge */
-.mode-badge {
-  display: flex; align-items: center; gap: 7px;
-  padding: 6px 14px;
-  border-radius: 100px;
-  font-family: 'Space Mono', monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: default;
-  transition: var(--transition);
+nav a {
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 0.85rem;
+  transition: color 0.2s;
 }
+nav a:hover { color: var(--text); }
 
-.mode-badge.dev  { background: var(--dev-dim);  border: 1px solid var(--dev-border);  color: var(--dev);  }
-.mode-badge.user { background: var(--user-dim); border: 1px solid var(--user-border); color: var(--user); }
-
-.mode-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-
-/* Icon button */
-.icon-btn {
-  width: 34px; height: 34px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-dim);
-  font-size: 15px;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: var(--transition);
-}
-.icon-btn:hover { color: var(--text); border-color: var(--border2); }
-
-/* ══════════════════════════════════════════════════
-   HERO
-══════════════════════════════════════════════════ */
+/* ── Hero ── */
 .hero {
-  padding: 52px 0 36px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
+  padding: 60px 24px 40px;
+  gap: 16px;
 }
 
 .hero-badge {
-  display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(59,130,246,0.08);
-  border: 1px solid rgba(59,130,246,0.18);
-  border-radius: 100px;
-  padding: 5px 14px;
-  font-family: 'Space Mono', monospace;
-  font-size: 10px; color: var(--user);
-  letter-spacing: 0.07em;
-  margin-bottom: 24px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 16px;
+  font-size: 0.78rem;
+  color: var(--dim);
+  letter-spacing: 0.05em;
 }
-
-.pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--green);
-         animation: pulse 2s ease-in-out infinite; }
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.6)} }
 
 .hero h1 {
   font-family: 'DM Serif Display', serif;
-  font-size: clamp(32px, 6.5vw, 56px);
-  font-weight: 400; line-height: 1.08;
-  letter-spacing: -0.025em;
-  margin-bottom: 14px;
+  font-size: clamp(2.5rem, 6vw, 4.5rem);
+  line-height: 1.1;
+  max-width: 700px;
 }
 
 .hero h1 em {
   font-style: italic;
-  background: linear-gradient(135deg, var(--user) 0%, var(--purple) 100%);
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hero p {
-  font-size: 15px; color: var(--text-dim); max-width: 460px;
-  margin: 0 auto; line-height: 1.65; font-weight: 400;
+  color: var(--dim);
+  font-size: 1.05rem;
+  max-width: 480px;
+  line-height: 1.6;
 }
 
-/* ══════════════════════════════════════════════════
-   PANELS
-══════════════════════════════════════════════════ */
-.panel {
+/* ── Install card ── */
+.install-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
-  margin-bottom: 14px;
-  transition: border-color var(--transition);
-}
-
-.panel:focus-within { border-color: var(--border2); }
-
-.panel-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px;
-  background: var(--surface2);
-  border-bottom: 1px solid var(--border);
-}
-
-.panel-title {
-  font-family: 'Space Mono', monospace;
-  font-size: 10px; font-weight: 700;
-  color: var(--text-dim);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.panel-body { padding: 18px; }
-.panel-body.tight { padding: 14px 18px; }
-
-/* ══════════════════════════════════════════════════
-   TABS
-══════════════════════════════════════════════════ */
-.tabs {
-  display: flex; gap: 2px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 10px; padding: 3px;
-  margin-bottom: 14px;
-}
-
-.tab {
-  flex: 1; padding: 10px 14px;
-  background: transparent; border: none;
-  border-radius: 7px;
-  color: var(--text-dim);
-  font-family: 'Syne', sans-serif;
-  font-size: 13px; font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition);
-  display: flex; align-items: center; justify-content: center; gap: 7px;
-}
-
-.tab:hover { color: var(--text); }
-.tab.active { background: var(--surface3); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.4); }
-
-/* ══════════════════════════════════════════════════
-   FORM ELEMENTS
-══════════════════════════════════════════════════ */
-.field { margin-bottom: 14px; }
-.field:last-child { margin-bottom: 0; }
-
-label {
-  display: block;
-  font-family: 'Space Mono', monospace;
-  font-size: 10px; font-weight: 700;
-  color: var(--text-dim);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  margin-bottom: 7px;
-}
-
-input[type=text], input[type=url], input[type=password], select, textarea {
+  border-radius: 20px;
+  padding: 40px;
+  max-width: 560px;
   width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 11px 14px;
-  font-family: 'Space Mono', monospace;
-  font-size: 12px;
-  color: var(--text);
-  outline: none;
-  transition: var(--transition);
+  margin: 8px 0;
 }
 
-input:focus, select:focus, textarea:focus {
-  border-color: rgba(59,130,246,.45);
-  box-shadow: 0 0 0 3px rgba(59,130,246,.07);
+.steps { display: flex; flex-direction: column; gap: 0; }
+
+.step {
+  display: flex;
+  gap: 16px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
 }
+.step:last-child { border-bottom: none; padding-bottom: 0; }
+.step:first-child { padding-top: 0; }
 
-input::placeholder, textarea::placeholder { color: var(--text-faint); }
-
-select { cursor: pointer; }
-select option { background: var(--surface2); }
-
-textarea { resize: vertical; min-height: 90px; line-height: 1.6; font-size: 11px; }
-
-.input-row { display: flex; gap: 10px; align-items: flex-start; }
-.input-row input { flex: 1; }
-
-/* two-column grid */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-@media(max-width:600px) { .grid-2 { grid-template-columns: 1fr; } }
-
-/* ══════════════════════════════════════════════════
-   BUTTONS
-══════════════════════════════════════════════════ */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  border: none; border-radius: var(--radius);
-  font-family: 'Syne', sans-serif; font-weight: 700;
-  cursor: pointer; white-space: nowrap;
-  transition: var(--transition);
-}
-
-.btn-primary {
-  padding: 12px 22px; font-size: 13px;
-  background: linear-gradient(135deg, var(--user) 0%, #2563eb 100%);
-  color: white;
-  box-shadow: 0 4px 14px rgba(59,130,246,.28);
-}
-.btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,130,246,.38); }
-.btn-primary:active:not(:disabled) { transform: none; }
-.btn-primary:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
-
-.btn-dev {
-  padding: 12px 22px; font-size: 13px;
-  background: linear-gradient(135deg, var(--dev) 0%, #d97706 100%);
-  color: #0a0600;
-  box-shadow: 0 4px 14px rgba(245,158,11,.25);
-}
-.btn-dev:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(245,158,11,.35); }
-.btn-dev:disabled { opacity: .45; cursor: not-allowed; }
-
-.btn-ghost {
-  padding: 10px 16px; font-size: 12px;
-  background: var(--surface2);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-.btn-ghost:hover { color: var(--text); border-color: var(--border2); }
-
-.btn-success {
-  padding: 11px 20px; font-size: 13px;
-  background: linear-gradient(135deg, var(--green) 0%, #059669 100%);
-  color: #001a12; font-weight: 700;
-  box-shadow: 0 4px 14px rgba(6,214,160,.22);
-}
-.btn-success:hover { transform: translateY(-1px); }
-
-.btn-danger {
-  padding: 10px 16px; font-size: 12px;
-  background: rgba(239,68,68,.1);
-  color: var(--red);
-  border: 1px solid rgba(239,68,68,.2);
-}
-.btn-danger:hover { background: rgba(239,68,68,.18); }
-
-.btn-sm { padding: 7px 14px; font-size: 11px; }
-
-/* full width */
-.btn-block { width: 100%; }
-
-/* spinner */
-.spin {
-  width: 13px; height: 13px;
-  border: 2px solid rgba(255,255,255,.25);
-  border-top-color: currentColor;
+.step-num {
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  animation: spin .65s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-
-/* ══════════════════════════════════════════════════
-   SETTINGS DRAWER
-══════════════════════════════════════════════════ */
-.settings-wrap {
-  overflow: hidden;
-  max-height: 0;
-  transition: max-height 0.35s ease;
-}
-.settings-wrap.open { max-height: 1000px; }
-
-.settings-inner {
-  padding: 18px;
-  border-top: 1px solid var(--border);
-  background: var(--surface2);
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
-.settings-section { margin-bottom: 18px; }
-.settings-section:last-child { margin-bottom: 0; }
-
-.settings-section-title {
-  font-family: 'Space Mono', monospace;
-  font-size: 9px; font-weight: 700;
-  letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--text-faint);
-  margin-bottom: 10px;
-}
-
-/* ══════════════════════════════════════════════════
-   AUTH PANEL (dev login)
-══════════════════════════════════════════════════ */
-.auth-panel {
-  background: var(--dev-dim);
-  border: 1px solid var(--dev-border);
-  border-radius: 14px;
-  padding: 24px;
-  text-align: center;
-  margin-bottom: 14px;
-  display: none;
-}
-.auth-panel.visible { display: block; }
-
-.auth-title {
-  font-family: 'DM Serif Display', serif;
-  font-size: 18px; color: var(--dev);
+.step-content h3 {
+  font-size: 0.95rem;
+  font-weight: 700;
   margin-bottom: 6px;
 }
-.auth-sub { font-size: 12px; color: var(--text-dim); margin-bottom: 18px; font-family: 'Space Mono', monospace; }
 
-.auth-row { display: flex; gap: 8px; max-width: 340px; margin: 0 auto; }
-.auth-row input { flex: 1; }
-
-/* ══════════════════════════════════════════════════
-   PROGRESS PANEL
-══════════════════════════════════════════════════ */
-.progress-panel { display: none; }
-.progress-panel.visible { display: block; }
-
-.progress-track { height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; }
-.progress-fill {
-  height: 100%; border-radius: 2px; width: 0%;
-  background: linear-gradient(90deg, var(--user), var(--purple));
-  transition: width .5s ease;
+.step-content p {
+  color: var(--dim);
+  font-size: 0.85rem;
+  line-height: 1.55;
 }
 
-.stats { display: flex; gap: 18px; align-items: center; }
+/* ── Bookmarklet button ── */
+.bm-wrap {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
 
+.bm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 4px 20px rgba(108,99,255,0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+  font-family: 'Syne', sans-serif;
+}
+.bm-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 28px rgba(108,99,255,0.5);
+}
+.bm-btn:active { cursor: grabbing; }
+
+.drag-hint {
+  font-size: 0.78rem;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ── Features ── */
+.features {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 700px;
+  margin-top: 8px;
+}
+
+.feat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+.feat span { color: var(--text); font-weight: 600; }
+
+/* ── Stats ── */
+.stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
+}
 .stat {
-  display: flex; align-items: center; gap: 6px;
-  font-family: 'Space Mono', monospace;
-  font-size: 10px; color: var(--text-faint);
-}
-.stat-val { color: var(--user); font-weight: 700; }
-
-.log {
-  max-height: 230px; overflow-y: auto;
-  display: flex; flex-direction: column; gap: 3px;
-  padding-top: 4px;
-}
-.log::-webkit-scrollbar { width: 3px; }
-.log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.log-line {
-  display: flex; align-items: baseline; gap: 10px;
-  font-family: 'Space Mono', monospace;
-  font-size: 10.5px; line-height: 1.55;
-  color: var(--text-dim);
-  animation: fadeup .15s ease both;
-}
-@keyframes fadeup { from{opacity:0;transform:translateY(3px)} to{opacity:1;transform:none} }
-
-.log-time { color: var(--text-faint); flex-shrink: 0; font-size: 9.5px; }
-.log-line.ok   { color: var(--green); }
-.log-line.err  { color: var(--red); }
-.log-line.warn { color: var(--dev); }
-
-/* ══════════════════════════════════════════════════
-   LIVE PREVIEW
-══════════════════════════════════════════════════ */
-.preview-panel { display: none; }
-.preview-panel.visible { display: block; }
-
-.preview-body {
-  padding: 24px 28px;
-  max-height: 480px;
-  overflow-y: auto;
-  font-family: 'DM Serif Display', serif;
-  font-size: 14.5px; line-height: 1.82;
-  color: #c2cfe0;
-}
-.preview-body::-webkit-scrollbar { width: 3px; }
-.preview-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-.preview-body h1 { font-size: 20px; color: var(--text); margin: 0 0 14px; }
-.preview-body h2 { font-size: 16px; color: #93c5fd; margin: 22px 0 9px; font-family: 'Syne', sans-serif; font-weight: 700; }
-.preview-body h3 { font-size: 13.5px; color: #c4b5fd; margin: 16px 0 7px; font-family: 'Syne', sans-serif; font-weight: 600; }
-.preview-body p  { margin-bottom: 11px; }
-.preview-body ul, .preview-body ol { margin: 7px 0 12px 22px; }
-.preview-body li { margin-bottom: 4px; }
-.preview-body strong { color: #fbbf24; font-family: 'Syne', sans-serif; font-weight: 700; }
-.preview-body em { font-style: italic; color: #a78bfa; }
-.preview-body code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-family: 'Space Mono', monospace; font-size: 10.5px; color: #86efac; }
-.preview-body pre { background: #050a10; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin: 12px 0; overflow-x: auto; }
-.preview-body pre code { background: none; padding: 0; color: #e2e8f0; font-size: 10.5px; }
-.preview-body blockquote { border-left: 3px solid var(--purple); background: rgba(139,92,246,.07); padding: 10px 15px; margin: 12px 0; color: #c4b5fd; font-style: italic; border-radius: 0 6px 6px 0; }
-.preview-body hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
-.preview-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-family: 'Syne', sans-serif; font-size: 12px; }
-.preview-body th { background: rgba(59,130,246,.15); color: #93c5fd; padding: 7px 11px; text-align: left; font-weight: 700; }
-.preview-body td { padding: 6px 11px; border-bottom: 1px solid var(--border); }
-
-.cursor::after { content: '▋'; animation: blink 1s step-end infinite; color: var(--user); font-size: 13px; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-/* ══════════════════════════════════════════════════
-   SUCCESS / RESULT CARD
-══════════════════════════════════════════════════ */
-.result-card {
-  display: none;
-  background: linear-gradient(135deg, rgba(6,214,160,.08) 0%, rgba(5,150,105,.04) 100%);
-  border: 1px solid rgba(6,214,160,.22);
-  border-radius: 14px;
-  padding: 22px 24px;
-  text-align: center;
-  margin-bottom: 14px;
-}
-.result-card.visible { display: block; animation: popin .35s cubic-bezier(.34,1.56,.64,1) both; }
-@keyframes popin { from{opacity:0;transform:scale(.95)} to{opacity:1;transform:none} }
-
-.result-icon { font-size: 32px; margin-bottom: 8px; }
-.result-title { font-family: 'DM Serif Display', serif; font-size: 20px; color: var(--green); margin-bottom: 5px; }
-.result-meta { font-family: 'Space Mono', monospace; font-size: 10px; color: var(--text-dim); margin-bottom: 16px; }
-.result-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-
-/* ══════════════════════════════════════════════════
-   CHIP
-══════════════════════════════════════════════════ */
-.chip {
-  display: inline-flex; align-items: center; gap: 5px;
   background: var(--surface2);
   border: 1px solid var(--border);
-  border-radius: 100px;
-  padding: 3px 10px;
-  font-family: 'Space Mono', monospace;
-  font-size: 9.5px; color: var(--text-dim);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: var(--dim);
 }
-.chip-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-faint); }
-.chip-dot.g { background: var(--green); }
-.chip-dot.b { background: var(--user); }
-.chip-dot.a { background: var(--dev); }
+.stat b { color: var(--accent2); }
 
-/* ══════════════════════════════════════════════════
-   DIVIDER
-══════════════════════════════════════════════════ */
-.divider {
-  display: flex; align-items: center; gap: 12px;
-  font-family: 'Space Mono', monospace; font-size: 9px;
-  color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em;
-  margin: 6px 0;
-}
-.divider::before, .divider::after { content:''; flex:1; height:1px; background: var(--border); }
-
-/* ══════════════════════════════════════════════════
-   FOOTER
-══════════════════════════════════════════════════ */
+/* ── Footer ── */
 footer {
   text-align: center;
-  padding-top: 48px;
-  font-family: 'Space Mono', monospace;
-  font-size: 9.5px; color: var(--text-faint);
-  letter-spacing: .05em;
+  padding: 24px;
+  color: var(--dim);
+  font-size: 0.78rem;
+  border-top: 1px solid var(--border);
 }
-footer a { color: var(--text-dim); text-decoration: none; }
-footer a:hover { color: var(--user); }
-
-/* ══════════════════════════════════════════════════
-   TOGGLE switch
-══════════════════════════════════════════════════ */
-.toggle-row { display: flex; align-items: center; justify-content: space-between; }
-.toggle-label { font-size: 12px; color: var(--text-dim); }
-
-.toggle { position:relative; width:36px; height:20px; flex-shrink:0; }
-.toggle input { opacity:0; width:0; height:0; }
-.toggle-track {
-  position:absolute; inset:0; cursor:pointer;
-  background: var(--border2); border-radius:100px;
-  transition: var(--transition);
-}
-.toggle input:checked + .toggle-track { background: var(--user); }
-.toggle-thumb {
-  position:absolute; top:3px; left:3px;
-  width:14px; height:14px; border-radius:50%;
-  background:white; transition: var(--transition);
-  pointer-events:none;
-}
-.toggle input:checked ~ .toggle-thumb { transform: translateX(16px); }
-
-/* ══════════════════════════════════════════════════
-   RESPONSIVE
-══════════════════════════════════════════════════ */
-@media(max-width:640px) {
-  .input-row { flex-direction: column; }
-  .hero { padding: 36px 0 28px; }
-  .topbar { flex-wrap: wrap; gap: 12px; }
-}
+footer a { color: var(--accent); text-decoration: none; }
 </style>
 </head>
-
 <body>
-<div class="app">
 
-<!-- ══ TOP BAR ════════════════════════════════════════ -->
-<div class="topbar">
-  <div class="logo">Tube<span>Scribe</span></div>
-  <div class="topbar-right">
-    <div class="chip" id="llm-chip"><span class="chip-dot" id="llm-dot"></span><span id="llm-label">…</span></div>
-    <div class="chip" id="tg-chip"><span class="chip-dot" id="tg-dot"></span><span id="tg-label">…</span></div>
-    <div class="mode-badge user" id="mode-badge"><span class="mode-dot"></span><span id="mode-label">User</span></div>
-    <button class="icon-btn" id="settings-toggle-btn" title="Settings" onclick="toggleSettings()">⚙</button>
-    <button class="icon-btn" id="auth-toggle-btn" title="Developer login" onclick="toggleAuth()">🔑</button>
-  </div>
-</div>
+<nav>
+  <span class="logo">TubeScribe</span>
+  <a href="https://github.com/karanmertiya/TubeScribe" target="_blank">GitHub ↗</a>
+</nav>
 
-<!-- ══ HERO ══════════════════════════════════════════ -->
-<div class="hero">
-  <div class="hero-badge"><span class="pulse"></span>GEMINI 2.5 · GROQ LLAMA 3.3 · WEASYPRINT PDF</div>
+<main class="hero">
+  <div class="hero-badge">📋 One click · Any YouTube video · Instant PDF</div>
+
   <h1>YouTube, turned into<br><em>perfect notes</em></h1>
-  <p>Video or playlist URL → structured Markdown notes → beautifully typeset PDF → delivered anywhere.</p>
-  <div id="stats-row" style="display:flex;gap:12px;justify-content:center;margin-top:18px;flex-wrap:wrap;"></div>
-</div>
 
-<!-- ══ DEV AUTH PANEL ════════════════════════════════ -->
-<div class="auth-panel" id="auth-panel">
-  <div class="auth-title">🔐 Developer Login</div>
-  <div class="auth-sub">Sign in to use server-side keys and send directly to your Telegram.</div>
-  <div class="auth-row">
-    <input type="password" id="auth-password" placeholder="Password…" onkeydown="if(event.key==='Enter')doLogin()">
-    <button class="btn btn-dev" onclick="doLogin()" id="login-btn">Sign In</button>
-  </div>
-  <div id="auth-error" style="color:var(--red);font-size:11px;margin-top:10px;font-family:'Space Mono',monospace;"></div>
-</div>
+  <p>A sidebar that slides in on any YouTube video. Click once, get structured Markdown notes and a beautifully typeset PDF — without leaving the video.</p>
 
-<!-- ══ SETTINGS DRAWER ════════════════════════════════ -->
-<div class="panel" id="settings-panel" style="display:none">
-  <div class="panel-header">
-    <span class="panel-title">⚙ Settings</span>
-    <button class="btn btn-ghost btn-sm" onclick="saveSettings()">Save</button>
-  </div>
-  <div class="settings-inner">
+  <div class="install-card">
+    <div class="steps">
 
-    <!-- LLM config (user mode only — hidden in dev mode) -->
-    <div id="user-settings-section">
-      <div class="settings-section-title">Your API Keys</div>
-      <div class="settings-section">
-        <div class="grid-2">
-          <div class="field">
-            <label>Provider</label>
-            <select id="s-provider" onchange="updateModelPlaceholder()">
-              <option value="gemini">Gemini (Google)</option>
-              <option value="groq">Groq (Llama)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Model</label>
-            <input type="text" id="s-model" placeholder="gemini-2.5-flash">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-content">
+          <h3>Drag this to your bookmarks bar</h3>
+          <p>One time only. Works in Chrome, Firefox, Safari, Edge.</p>
+          <div class="bm-wrap">
+            <a class="bm-btn" id="bm-link" href="#">📋 TubeScribe</a>
+            <span class="drag-hint">↑ Drag me to your bookmarks bar</span>
           </div>
         </div>
-        <div class="field" style="margin-top:12px">
-          <label>API Key</label>
-          <input type="password" id="s-api-key" placeholder="Your API key — never sent to our server except for your requests">
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-content">
+          <h3>Open any YouTube video</h3>
+          <p>Lectures, tutorials, podcasts — any video with captions.</p>
         </div>
       </div>
 
-
-    </div>
-
-    <!-- System prompt (both modes) -->
-    <div class="divider">System Prompt</div>
-    <div class="settings-section" style="margin-top:12px">
-      <div class="field">
-        <label>LLM Instruction</label>
-        <textarea id="s-system-prompt" rows="5" placeholder="Loading default prompt…"></textarea>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-content">
+          <h3>Click TubeScribe in your bookmarks</h3>
+          <p>A sidebar slides in on the YouTube page. Notes generate live, PDF downloads in one click.</p>
+        </div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="resetPrompt()">Reset to default</button>
-    </div>
 
-    <!-- Dev: logout -->
-    <div id="dev-settings-section" style="display:none">
-      <div class="divider" style="margin-top:4px">Developer</div>
-      <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
-        <button class="btn btn-danger btn-sm" onclick="doLogout()">Sign Out</button>
-        <span style="font-family:'Space Mono',monospace;font-size:10px;color:var(--text-faint);">Using server-side keys. API keys above are ignored.</span>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ══ MAIN INPUT ═════════════════════════════════════ -->
-<div class="panel">
-  <div class="panel-header">
-    <div class="tabs" style="margin:0;flex:1;border:none;background:transparent;padding:0;gap:4px">
-      <button class="tab active" id="tab-single"   onclick="setMode('single')">📹 Single Video</button>
-      <button class="tab"        id="tab-playlist" onclick="setMode('playlist')">📋 Playlist <span style="font-size:10px;background:rgba(251,191,36,.18);color:#fbbf24;border:1px solid rgba(251,191,36,.35);border-radius:4px;padding:1px 6px;margin-left:4px;font-weight:700;letter-spacing:.04em;">PREVIEW</span></span></button>
     </div>
   </div>
-  <div class="panel-body">
-    <div class="input-row">
-      <input type="url" id="url-input"
-             placeholder="https://youtube.com/watch?v=…"
-             autocomplete="off" spellcheck="false"
-             onkeydown="if(event.key==='Enter'&&!goBusy)go()">
-      <button class="btn btn-primary" id="go-btn" onclick="go()">
-        <span id="go-icon">▶</span>
-        <span id="go-text">Generate</span>
-      </button>
-    </div>
-  </div>
-</div>
 
-<!-- ══ PROGRESS ═══════════════════════════════════════ -->
-<div class="panel progress-panel" id="progress-panel">
-  <div class="panel-header">
-    <span class="panel-title">Pipeline</span>
-    <div class="stats">
-      <div class="stat">Videos <span class="stat-val" id="stat-done">0</span>/<span class="stat-val" id="stat-total">?</span></div>
-      <div class="stat">Elapsed <span class="stat-val" id="stat-time">0s</span></div>
-    </div>
+  <div class="features">
+    <div class="feat"><span>No server IP issues</span> — runs in your browser</div>
+    <div class="feat"><span>Groq LLaMA 3.3</span> — notes in seconds</div>
+    <div class="feat"><span>WeasyPrint PDF</span> — beautifully typeset</div>
+    <div class="feat"><span>Works on restricted videos</span> — age-gated, members</div>
   </div>
-  <div class="progress-track" style="margin:0 18px"><div class="progress-fill" id="prog-bar"></div></div>
-  <div class="panel-body tight">
-    <div class="log" id="log"></div>
-  </div>
-</div>
 
-<!-- ══ LIVE PREVIEW ═══════════════════════════════════ -->
-<div class="panel preview-panel" id="preview-panel">
-  <div class="panel-header">
-    <span class="panel-title" id="preview-label">Live Preview</span>
-    <div style="display:flex;gap:8px;align-items:center">
-      <span class="chip" id="chunk-chip" style="display:none">
-        <span class="chip-dot b"></span>
-        <span id="chunk-label">0/0</span>
-      </span>
-      <button class="btn btn-ghost btn-sm" id="dl-btn" style="display:none" onclick="downloadPDF()">⬇ PDF</button>
-      <button class="btn btn-ghost btn-sm" id="copy-btn" style="display:none" onclick="copyMarkdown()">⎘ Copy</button>
-    </div>
+  <div class="stats" id="stats">
+    <div class="stat">Loading stats…</div>
   </div>
-  <div class="preview-body cursor" id="preview-body"></div>
-</div>
-
-<!-- ══ RESULT CARD ════════════════════════════════════ -->
-<div class="result-card" id="result-card">
-  <div class="result-icon">🎉</div>
-  <div class="result-title" id="result-title">Done!</div>
-  <div class="result-meta"  id="result-meta"></div>
-  <div class="result-actions" id="result-actions"></div>
-</div>
+</main>
 
 <footer>
-  <p>YT Notes Maker &nbsp;·&nbsp; <a href="/docs" target="_blank">API Docs</a> &nbsp;·&nbsp; <a href="/health" target="_blank">Health</a> &nbsp;·&nbsp; <a href="/webhook/telegram" style="display:none">Webhook</a></p>
+  Built with ♥ · <a href="https://github.com/karanmertiya/TubeScribe" target="_blank">Open source on GitHub</a>
 </footer>
-</div><!-- /.app -->
 
 <script>
-/* ═══════════════════════════════════════════════════
-   STATE
-═══════════════════════════════════════════════════ */
-const API        = window.location.origin;
-let devMode      = false;
-let inputMode    = 'single';    // 'single' | 'playlist'
-let goBusy       = false;
-let fullMd       = '';
-let videoTitle   = 'Notes';
-let startTime    = null;
-let timerH       = null;
-let defaultPrompt = '';
-
-/* ═══════════════════════════════════════════════════
-   SESSION STORAGE  (user settings)
-═══════════════════════════════════════════════════ */
-function loadSettings() {
-  return JSON.parse(sessionStorage.getItem('ytn_settings') || '{}');
-}
-function saveSettingsToStore(s) {
-  sessionStorage.setItem('ytn_settings', JSON.stringify(s));
-}
-
-/* ═══════════════════════════════════════════════════
-   INIT
-═══════════════════════════════════════════════════ */
-async function init() {
-  // Load default prompt
-  try {
-    const r = await fetch(`${API}/default-prompt`);
-    const d = await r.json();
-    defaultPrompt = d.prompt;
-  } catch { defaultPrompt = ''; }
-
-  // Populate settings form from sessionStorage
-  const s = loadSettings();
-  if (s.provider) document.getElementById('s-provider').value = s.provider;
-  if (s.model)    document.getElementById('s-model').value    = s.model;
-  if (s.apiKey)   document.getElementById('s-api-key').value  = s.apiKey;
-  document.getElementById('s-system-prompt').value = s.systemPrompt || defaultPrompt;
-  updateModelPlaceholder();
-
-  // Check session
-  await checkAuth();
-}
-
-async function checkAuth() {
-  try {
-    const r = await fetch(`${API}/auth/me`, { credentials: 'include' });
-    const d = await r.json();
-    applyMode(d.mode === 'developer');
-    updateChips(d);
-  } catch {
-    applyMode(false);
-  }
-}
-
-function applyMode(isDev) {
-  devMode = isDev;
-
-  // Mode badge
-  const badge = document.getElementById('mode-badge');
-  const label = document.getElementById('mode-label');
-  badge.className = 'mode-badge ' + (isDev ? 'dev' : 'user');
-  label.textContent = isDev ? 'Developer' : 'User';
-
-  // Go button style
-  const btn = document.getElementById('go-btn');
-  btn.className = 'btn ' + (isDev ? 'btn-dev' : 'btn-primary');
-
-  // Settings sections
-  document.getElementById('user-settings-section').style.display = isDev ? 'none' : '';
-  document.getElementById('dev-settings-section').style.display  = isDev ? '' : 'none';
-
-  // Auth panel visibility
-  document.getElementById('auth-panel').classList.remove('visible');
-}
-
-function updateChips(d) {
-  const llmDot   = document.getElementById('llm-dot');
-  const llmLabel = document.getElementById('llm-label');
-  const tgDot    = document.getElementById('tg-dot');
-  const tgLabel  = document.getElementById('tg-label');
-
-  if (devMode) {
-    llmDot.className   = 'chip-dot ' + (d.gemini_ready || d.groq_ready ? 'g' : '');
-    llmLabel.textContent = d.llm_provider?.toUpperCase() + ' · ' + (d.llm_model || '');
-    tgDot.className    = 'chip-dot ' + (d.tg_configured ? 'g' : '');
-    tgLabel.textContent = d.tg_configured ? 'Telegram ✓' : 'Telegram —';
-  } else {
-    const s = loadSettings();
-    llmDot.className   = 'chip-dot ' + (s.apiKey ? 'b' : '');
-    llmLabel.textContent = s.provider ? s.provider.toUpperCase() + (s.model ? ' · ' + s.model.split('-').slice(0,3).join('-') : '') : 'No key set';
-    tgDot.className    = 'chip-dot';
-    tgLabel.textContent = 'User mode';
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   AUTH
-═══════════════════════════════════════════════════ */
-function toggleAuth() {
-  if (devMode) { toggleSettings(); return; }
-  const p = document.getElementById('auth-panel');
-  p.classList.toggle('visible');
-}
-
-async function doLogin() {
-  const pw = document.getElementById('auth-password').value;
-  const btn = document.getElementById('login-btn');
-  btn.disabled = true; btn.textContent = '…';
-  document.getElementById('auth-error').textContent = '';
-
-  try {
-    const r = await fetch(`${API}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ password: pw }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Login failed');
-    document.getElementById('auth-password').value = '';
-    await checkAuth();
-  } catch (e) {
-    document.getElementById('auth-error').textContent = '✗ ' + e.message;
-  } finally {
-    btn.disabled = false; btn.textContent = 'Sign In';
-  }
-}
-
-async function doLogout() {
-  await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
-  await checkAuth();
-  document.getElementById('settings-panel').style.display = 'none';
-}
-
-/* ═══════════════════════════════════════════════════
-   SETTINGS
-═══════════════════════════════════════════════════ */
-function toggleSettings() {
-  const p = document.getElementById('settings-panel');
-  p.style.display = p.style.display === 'none' ? '' : 'none';
-}
-
-function saveSettings() {
-  const s = {
-    provider:     document.getElementById('s-provider').value,
-    model:        document.getElementById('s-model').value.trim(),
-    apiKey:       document.getElementById('s-api-key').value.trim(),
-    systemPrompt: document.getElementById('s-system-prompt').value.trim(),
-  };
-  saveSettingsToStore(s);
-  document.getElementById('settings-panel').style.display = 'none';
-  updateChips({});
-  flash('Settings saved ✓');
-}
-
-function resetPrompt() {
-  document.getElementById('s-system-prompt').value = defaultPrompt;
-}
-
-function updateModelPlaceholder() {
-  const provider = document.getElementById('s-provider').value;
-  document.getElementById('s-model').placeholder =
-    provider === 'gemini' ? 'gemini-2.5-flash' : 'llama-3.3-70b-versatile';
-}
-
-function flash(msg) {
-  const el = document.createElement('div');
-  el.textContent = msg;
-  Object.assign(el.style, {
-    position: 'fixed', bottom: '28px', left: '50%', transform: 'translateX(-50%)',
-    background: 'var(--green)', color: '#001a12',
-    padding: '9px 20px', borderRadius: '100px',
-    fontFamily: "'Space Mono',monospace", fontSize: '11px', fontWeight: '700',
-    zIndex: '9999', animation: 'popin .3s ease both',
-    boxShadow: '0 4px 16px rgba(6,214,160,.3)',
-  });
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2200);
-}
-
-/* ═══════════════════════════════════════════════════
-   INPUT MODE
-═══════════════════════════════════════════════════ */
-function setMode(m) {
-  inputMode = m;
-  document.getElementById('tab-single').classList.toggle('active',   m === 'single');
-  document.getElementById('tab-playlist').classList.toggle('active', m === 'playlist');
-  document.getElementById('url-input').placeholder =
-    m === 'single'
-      ? 'https://youtube.com/watch?v=…'
-      : 'https://youtube.com/playlist?list=…';
-  resetUI();
-}
-
-/* ═══════════════════════════════════════════════════
-   UI HELPERS
-═══════════════════════════════════════════════════ */
-function resetUI() {
-  fullMd = ''; videoTitle = 'Notes';
-  hide('progress-panel'); hide('preview-panel'); hide('result-card');
-  document.getElementById('log').innerHTML = '';
-  document.getElementById('preview-body').innerHTML = '';
-  document.getElementById('prog-bar').style.width = '0%';
-  document.getElementById('dl-btn').style.display = 'none';
-  document.getElementById('copy-btn').style.display = 'none';
-  document.getElementById('chunk-chip').style.display = 'none';
-  document.getElementById('stat-done').textContent = '0';
-  document.getElementById('stat-total').textContent = '?';
-  document.getElementById('stat-time').textContent = '0s';
-  stopTimer();
-}
-
-function show(id) { document.getElementById(id).classList.add('visible'); document.getElementById(id).style.display = ''; }
-function hide(id) { document.getElementById(id).classList.remove('visible'); }
-
-function setBusy(busy) {
-  goBusy = busy;
-  const btn  = document.getElementById('go-btn');
-  btn.disabled = busy;
-  if (busy) {
-    document.getElementById('go-icon').outerHTML = '<span id="go-icon" class="spin"></span>';
-    document.getElementById('go-text').textContent = 'Working…';
-  } else {
-    document.getElementById('go-icon').outerHTML = '<span id="go-icon">▶</span>';
-    document.getElementById('go-text').textContent = 'Generate';
-  }
-}
-
-function logLine(msg, cls = '') {
-  show('progress-panel');
-  const log = document.getElementById('log');
-  const t   = new Date().toLocaleTimeString('en', { hour12:false });
-  const el  = document.createElement('div');
-  el.className = 'log-line' + (cls ? ' ' + cls : '');
-  el.innerHTML = `<span class="log-time">${t}</span><span>${esc(msg)}</span>`;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
-}
-
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function setProgress(pct) {
-  document.getElementById('prog-bar').style.width = Math.min(100, pct) + '%';
-}
-
-function startTimer() {
-  startTime = Date.now();
-  timerH    = setInterval(() => {
-    const s = Math.floor((Date.now() - startTime) / 1000);
-    document.getElementById('stat-time').textContent = s < 60 ? s+'s' : Math.floor(s/60)+'m'+(s%60)+'s';
-  }, 1000);
-}
-function stopTimer() { if (timerH) { clearInterval(timerH); timerH = null; } }
-
-function showResult({ title, meta, actions = [] }) {
-  document.getElementById('result-title').textContent = title;
-  document.getElementById('result-meta').textContent  = meta;
-  const el = document.getElementById('result-actions');
-  el.innerHTML = '';
-  actions.forEach(a => {
-    const b = document.createElement('button');
-    b.className = 'btn ' + (a.primary ? 'btn-success' : 'btn-ghost');
-    b.textContent = a.label;
-    if (a.href) { b.onclick = () => window.open(a.href, '_blank'); }
-    else if (a.fn) { b.onclick = a.fn; }
-    el.appendChild(b);
-  });
-  show('result-card');
-}
-
-/* ═══════════════════════════════════════════════════
-   BUILD REQUEST BODY
-═══════════════════════════════════════════════════ */
-function buildBody(extra = {}, requireApiKey = false) {
-  const s = loadSettings();
-  const body = { ...extra };
-
-  if (!devMode) {
-    if (requireApiKey) {
-      // Playlist (Preview) — user must bring their own key
-      if (!s.apiKey) throw new Error(
-        '📋 Playlist generation requires your own API key.\n' +
-        'Add it in ⚙ Settings → API Key.\n' +
-        'Get a free key at console.groq.com or aistudio.google.com'
-      );
-    }
-    // Always attach key + provider if set; server uses its own key for single video if missing
-    if (s.apiKey) body.api_key = s.apiKey;
-    body.llm_provider  = s.provider  || 'groq';
-    body.llm_model     = s.model     || undefined;
-  }
-
-  const prompt = document.getElementById('s-system-prompt')?.value?.trim();
-  if (prompt && prompt !== defaultPrompt) body.system_prompt = prompt;
-
-  return body;
-}
-
-/* ═══════════════════════════════════════════════════
-   ENTRY
-═══════════════════════════════════════════════════ */
-function go() {
-  if (goBusy) return;
-  const url = document.getElementById('url-input').value.trim();
-  if (!url) { document.getElementById('url-input').focus(); return; }
-
-  resetUI(); setBusy(true); startTimer();
-  inputMode === 'playlist' ? runPlaylist(url) : runSingle(url);
-}
-
-// ── Bookmarklet autostart ─────────────────────────────────────────────────────
-// When /from-browser POSTs transcript, the server injects window._tubescribeAutostart
-// We pick it up here and skip straight to note generation
-window.addEventListener('DOMContentLoaded', () => {
-  const auto = window._tubescribeAutostart;
-  if (!auto?.transcript) return;
-
-  // Pre-fill the URL input with a fake YouTube URL so the UI looks right
-  const urlInput = document.getElementById('url-input');
-  if (urlInput && auto.videoId) {
-    urlInput.value = `https://www.youtube.com/watch?v=${auto.videoId}`;
-  }
-
-  // Small delay so the UI renders first
-  setTimeout(() => {
-    resetUI(); setBusy(true); startTimer();
-    runSingleWithTranscript(auto.title, auto.transcript, auto.videoId);
-  }, 300);
+// ── Load stats ────────────────────────────────────────────────────────────────
+fetch('/stats').then(r => r.json()).then(d => {
+  const s = document.getElementById('stats');
+  s.innerHTML = [
+    `<div class="stat"><b>${(d.pdfs_generated||0).toLocaleString()}</b> PDFs generated</div>`,
+    `<div class="stat"><b>${(d.videos_processed||0).toLocaleString()}</b> videos processed</div>`,
+    `<div class="stat"><b>${(d.distinct_users||0).toLocaleString()}</b> users</div>`,
+  ].join('');
+}).catch(() => {
+  document.getElementById('stats').innerHTML = '';
 });
 
-/* ═══════════════════════════════════════════════════
-   TRANSCRIPT FETCH (browser-side, avoids server IP block)
-═══════════════════════════════════════════════════ */
-
-
-/* ═══════════════════════════════════════════════════
-   SINGLE VIDEO (with pre-fetched transcript from bookmarklet)
-═══════════════════════════════════════════════════ */
-async function runSingleWithTranscript(title, transcript, videoId) {
-  show('preview-panel');
-  videoTitle = title;
-  document.getElementById('preview-label').textContent = title;
-  logLine('📋 Transcript received from browser (' + transcript.split(/\s+/).length.toLocaleString() + ' words)');
-  logLine('🤖 Generating notes with Groq…');
-
-  let body;
-  try {
-    body = buildBody({
-      url: `https://www.youtube.com/watch?v=${videoId || 'unknown'}`,
-      video_id: videoId,
-      prefetched_title: title,
-      prefetched_transcript: transcript,
-    }, false);
-  } catch(e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
-
-  try {
-    const res = await fetch(`${API}/stream-notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Server ${res.status}`);
-    const reader = res.body.getReader();
-    const dec    = new TextDecoder();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      for (const line of dec.decode(value).split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        let d; try { d = JSON.parse(line.slice(6)); } catch { continue; }
-        if (d.total_chunks) {
-          document.getElementById('chunk-chip').style.display = 'inline-flex';
-          document.getElementById('chunk-label').textContent = `0/${d.total_chunks}`;
-        }
-        if (d.chunk) {
-          fullMd += d.chunk;
-          document.getElementById('preview-body').innerHTML = marked.parse(fullMd);
-          document.getElementById('preview-body').scrollTop = 99999;
-          if (d.chunk_index && d.total_chunks) {
-            document.getElementById('chunk-label').textContent = `${d.chunk_index}/${d.total_chunks}`;
-            setProgress(d.chunk_index / d.total_chunks * 100);
-          }
-        }
-        if (d.done) {
-          document.getElementById('preview-body').classList.remove('cursor');
-          document.getElementById('dl-btn').style.display  = 'inline-flex';
-          document.getElementById('copy-btn').style.display = 'inline-flex';
-          stopTimer();
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const words   = fullMd.split(/\s+/).filter(Boolean).length;
-          showResult({
-            title: 'Notes ready!',
-            meta: `${videoTitle} · ${words.toLocaleString()} words · ${elapsed}s`,
-            actions: [
-              { label: '⬇ Download PDF', primary: true, fn: downloadPDF },
-              { label: '⎘ Copy Markdown', fn: copyMarkdown },
-              { label: '+ New video', fn: () => { resetUI(); document.getElementById('url-input').value=''; document.getElementById('url-input').focus(); }},
-            ],
-          });
-        }
-        if (d.error) throw new Error(d.error);
-      }
-    }
-  } catch(e) {
-    logLine('❌ ' + e.message, 'error');
-  } finally {
-    setBusy(false); stopTimer();
-  }
-}
-
-
-async function runSingle(url) {
-  show('preview-panel');
-  let body;
-  try { body = buildBody({ url }, false); }
-  catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
-
-  // Fetch video title browser-side via oEmbed (CORS-friendly, no server needed)
-  // Note: YouTube's timedtext API is dead for server IPs — Gemini handles transcript server-side
-  try {
-    const oEmbed = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
-    if (oEmbed.ok) {
-      const od = await oEmbed.json();
-      if (od.title) { body.title = od.title; videoTitle = od.title; }
-    }
-  } catch(_) {}
-
-  logLine('🔍 Fetching transcript…');
-
-  try {
-    const res = await fetch(`${API}/stream-notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Server ${res.status}`);
-
-    const reader = res.body.getReader();
-    const dec    = new TextDecoder();
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      for (const line of dec.decode(value).split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        let d; try { d = JSON.parse(line.slice(6)); } catch { continue; }
-
-        if (d.title && d.title !== 'Extracting via Gemini…') {
-          videoTitle = d.title;
-          document.getElementById('preview-label').textContent = d.title;
-        }
-        if (d.model_used) {
-          logLine('✦ Using ' + d.model_used);
-        }
-        if (d.type === 'log') {
-          logLine(d.msg, d.msg.startsWith('⚠') ? 'warn' : '');
-        }
-        if (d.total_chunks) {
-          document.getElementById('chunk-chip').style.display = 'inline-flex';
-          document.getElementById('chunk-label').textContent = `0/${d.total_chunks}`;
-        }
-        if (d.chunk) {
-          fullMd += d.chunk;
-          document.getElementById('preview-body').innerHTML = marked.parse(fullMd);
-          document.getElementById('preview-body').scrollTop = 99999;
-          if (d.chunk_index && d.total_chunks) {
-            document.getElementById('chunk-label').textContent = `${d.chunk_index}/${d.total_chunks}`;
-            setProgress(d.chunk_index / d.total_chunks * 100);
-          }
-        }
-        if (d.done) {
-          document.getElementById('preview-body').classList.remove('cursor');
-          document.getElementById('dl-btn').style.display  = 'inline-flex';
-          document.getElementById('copy-btn').style.display = 'inline-flex';
-          stopTimer();
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const words   = fullMd.split(/\s+/).filter(Boolean).length;
-          showResult({
-            title: 'Notes ready!',
-            meta: `${videoTitle} · ${words.toLocaleString()} words · ${elapsed}s`,
-            actions: [
-              { label: '⬇ Download PDF', primary: true, fn: downloadPDF },
-              { label: '⎘ Copy Markdown', fn: copyMarkdown },
-              { label: '+ New video', fn: () => { resetUI(); document.getElementById('url-input').value = ''; document.getElementById('url-input').focus(); } },
-            ],
-          });
-        }
-        if (d.error) throw new Error(d.error);
-      }
-    }
-  } catch (e) {
-    logLine('❌ ' + e.message, 'err');
-  } finally {
-    setBusy(false); stopTimer();
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   PLAYLIST
-═══════════════════════════════════════════════════ */
-async function runPlaylist(url) {
-  let body;
-  try { body = buildBody({ url }, true); }  // playlist requires user API key
-  catch (e) { logLine('⚠ ' + e.message, 'warn'); setBusy(false); stopTimer(); return; }
-
-  try {
-    const res = await fetch(`${API}/process-playlist`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`Server ${res.status}`);
-
-    const reader = res.body.getReader();
-    const dec    = new TextDecoder();
-    let totalVids = 0;
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      for (const line of dec.decode(value).split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        let d; try { d = JSON.parse(line.slice(6)); } catch { continue; }
-
-        if (d.total) {
-          totalVids = d.total;
-          document.getElementById('stat-total').textContent = d.total;
-        }
-        if (d.type === 'progress') logLine(d.msg);
-        if (d.type === 'video_done') {
-          document.getElementById('stat-done').textContent = d.done;
-          if (totalVids) setProgress(d.done / totalVids * 100);
-          logLine(d.msg, 'ok');
-        }
-        if (d.type === 'done') {
-          setProgress(100); logLine(d.msg, 'ok'); stopTimer();
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const actions = [];
-          if (d.pdf_b64) {
-            const blob = b64toBlob(d.pdf_b64, 'application/pdf');
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement('a');
-            a.href = url; a.download = d.filename || 'notes.pdf'; a.click();
-            setTimeout(() => URL.revokeObjectURL(url), 5000);
-            actions.push({ label: '⬇ Saved to downloads', primary: true, fn: () => {} });
-          } else {
-            actions.push({ label: '✓ Check Telegram', primary: true, fn: () => {} });
-          }
-          showResult({
-            title: 'Playlist done!',
-            meta:  `${d.videos_done} video${d.videos_done!==1?'s':''} · ${d.size_mb} MB · ${elapsed}s`,
-            actions,
-          });
-        }
-        if (d.type === 'error') { logLine(d.msg, 'err'); stopTimer(); }
-      }
-    }
-  } catch (e) {
-    logLine('❌ ' + e.message, 'err');
-  } finally {
-    setBusy(false); stopTimer();
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   COPY MARKDOWN
-═══════════════════════════════════════════════════ */
-async function copyMarkdown() {
-  if (!fullMd) return;
-  try {
-    await navigator.clipboard.writeText(fullMd);
-    flash('Markdown copied ✓');
-  } catch {
-    // Fallback for browsers without clipboard API
-    const ta = document.createElement('textarea');
-    ta.value = fullMd;
-    ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    flash('Markdown copied ✓');
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   PDF DOWNLOAD  (single video)
-═══════════════════════════════════════════════════ */
-async function downloadPDF() {
-  const btn = document.getElementById('dl-btn');
-  btn.disabled = true; btn.textContent = '⏳';
-
-  const s = loadSettings();
-  const body = {
-    title:    videoTitle,
-    markdown: fullMd,
-  };
-
-  try {
-    const res = await fetch(`${API}/markdown-to-pdf`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error('PDF generation failed');
-    const blob = await res.blob();
-    const a    = document.createElement('a');
-    a.href     = URL.createObjectURL(blob);
-    a.download = videoTitle.replace(/[^a-z0-9]/gi,'_').toLowerCase() + '.pdf';
-    a.click();
-  } catch (e) {
-    logLine('PDF error: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false; btn.textContent = '⬇ PDF';
-  }
-}
-
-/* ═══════════════════════════════════════════════════
-   HELPERS
-═══════════════════════════════════════════════════ */
-function b64toBlob(b64, mime) {
-  const bin = atob(b64);
-  const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  return new Blob([arr], { type: mime });
-}
-
-/* ═══════════════════════════════════════════════════
-   STATS
-═══════════════════════════════════════════════════ */
-async function loadStats() {
-  try {
-    const r = await fetch(`${API}/stats`);
-    const d = await r.json();
-    if (!d || !Object.keys(d).length) return;
-    const row = document.getElementById('stats-row');
-    if (!row) return;
-    const items = [
-      { label: 'PDFs generated',   val: d.pdfs_generated    || 0 },
-      { label: 'Videos processed', val: d.videos_processed  || 0 },
-      { label: 'Distinct users',   val: d.distinct_users    || 0 },
-      { label: 'Active today',     val: d.daily_active_users|| 0 },
-    ];
-    row.innerHTML = items.map(i =>
-      `<div class="chip"><span class="chip-dot g"></span>${i.val.toLocaleString()} ${i.label}</div>`
-    ).join('');
-  } catch { /* stats are optional */ }
-}
-
-/* ═══════════════════════════════════════════════════
-   BOOT
-═══════════════════════════════════════════════════ */
-loadStats();
-init();
+// ── Set bookmarklet href ──────────────────────────────────────────────────────
+// Loader pattern: tiny href that fetches the real script from the server
+// Update bookmarklet.js anytime — all users get it instantly, no re-drag needed
+const loaderCode = `(function(){var s=document.createElement('script');s.src='https://tube-scribe.up.railway.app/bookmarklet.js?t='+Date.now();document.head.appendChild(s)})()`; 
+document.getElementById('bm-link').href = 'javascript:' + encodeURIComponent(loaderCode);
 </script>
+
 </body>
 </html>

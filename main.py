@@ -50,7 +50,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://www.youtube.com",
+        "https://youtube.com",
+        "https://tube-scribe.up.railway.app",
+        "http://localhost:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -340,7 +345,17 @@ async def debug_paths():
         "setup_exists": os.path.exists(os.path.join(frontend, "setup.html")),
     }
 
-@app.get("/setup", tags=["System"], include_in_schema=False)
+@app.get("/bookmarklet.js", include_in_schema=False)
+async def bookmarklet_script():
+    """Serves the sidebar bookmarklet — update this file, all users get it instantly."""
+    path = os.path.join(os.path.dirname(__file__), "frontend", "bookmarklet.js")
+    if os.path.exists(path):
+        return FileResponse(path, media_type="application/javascript",
+                            headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+    return JSONResponse({"error": "Bookmarklet not found"}, status_code=404)
+
+
+
 async def setup_page(request: Request):
     """Bookmarklet setup page."""
     html_path = os.path.join(os.path.dirname(__file__), "frontend", "setup.html")

@@ -3,8 +3,6 @@ Pipeline orchestration — yields SSE events.
 Imports from all backend packages; nothing else should import from here
 except main.py routes.
 """
-import base64
-import datetime
 import hashlib
 import json
 import logging
@@ -153,48 +151,28 @@ async def run_single_stream(
     prefetched_transcript: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Single-video pipeline — streams markdown chunks as SSE.
-    If prefetched_transcript is provided, skip the YouTube fetch entirely.
+    Transcript must be pre-fetched by the browser bookmarklet.
     """
     mode = "dev" if dev_mode else "user"
 
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            if prefetched_transcript:
-                # Transcript fetched browser-side — skip YouTube entirely
-                title      = prefetched_title or "Untitled Video"
-                transcript = prefetched_transcript
-                yield f"data: {json.dumps({'title': title})}\n\n"
+            if not prefetched_transcript:
+                yield f"data: {json.dumps({'error': 'No transcript provided. Use the TubeScribe bookmarklet on a YouTube video page.'})}\n\n"
+                return
 
-                chunks = chunk(transcript, CHUNK_WORDS)
-                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
+            title      = prefetched_title or "Untitled Video"
+            transcript = prefetched_transcript
+            yield f"data: {json.dumps({'title': title})}\n\n"
 
-                for i, c in enumerate(chunks, 1):
-                    notes = call_llm(llm, c)
-                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                    if len(chunks) > 1:
-                        time.sleep(0.2)
+            chunks = chunk(transcript, CHUNK_WORDS)
+            yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
 
-            else:
-                # Fetch transcript via Cloudflare Worker, then use Groq for notes
-                worker_url = os.getenv("YT_PROXY_WORKER", "").strip()
-                if not worker_url:
-                    raise RuntimeError(
-                        "YT_PROXY_WORKER env var not set. "
-                        "Deploy the Cloudflare Worker and set the URL in Railway env vars."
-                    )
-
-                from backend.youtube.transcript import extract as yt_extract
-                yield f"data: {json.dumps({'title': 'Fetching transcript…', 'status': 'fetching'})}\n\n"
-                title, transcript_text = yt_extract(video_url, "")
-                yield f"data: {json.dumps({'title': title})}\n\n"
-
-                chunks = chunk(transcript_text, CHUNK_WORDS)
-                yield f"data: {json.dumps({'total_chunks': len(chunks)})}\n\n"
-                for i, c in enumerate(chunks, 1):
-                    notes = call_llm(llm, c)
-                    yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
-                    if len(chunks) > 1:
-                        time.sleep(0.2)
+            for i, c in enumerate(chunks, 1):
+                notes = call_llm(llm, c)
+                yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
+                if len(chunks) > 1:
+                    time.sleep(0.2)
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
