@@ -166,12 +166,15 @@
           throw new Error('Both JSON3 and XML caption formats failed');
         }
         var seen = new Set(), segs = [];
+        if (data && data.events) {
         (data.events || []).forEach(function(ev) {
           if (!ev.segs) return;
           var t = ev.segs.map(function(s){return s.utf8||'';}).join('').replace(/\n/g,' ').replace(/\s+/g,' ').trim();
           if (!t || t === '[Music]' || seen.has(t)) return;
           seen.add(t); segs.push(t);
         });
+        }
+        log('JSON3 parsed: ' + (data ? Object.keys(data).join(',') : 'null') + ' segs=' + segs.length);
         if (segs.length > 5) {
           log('\u2713 ' + segs.length + ' segments, ~' + segs.join(' ').split(/\s+/).length + ' words');
           return segs.join(' ');
