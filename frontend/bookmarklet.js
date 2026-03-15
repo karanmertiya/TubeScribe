@@ -174,7 +174,6 @@
           seen.add(t); segs.push(t);
         });
         }
-        log('JSON3 parsed: ' + (data ? Object.keys(data).join(',') : 'null') + ' segs=' + segs.length);
         if (segs.length > 5) {
           log('\u2713 ' + segs.length + ' segments, ~' + segs.join(' ').split(/\s+/).length + ' words');
           return segs.join(' ');
@@ -252,9 +251,12 @@
     while (true) {
       var chunk = await reader.read();
       if (chunk.done) break;
-      dec.decode(chunk.value).split('\n').forEach(function(line) {
-        if (!line.startsWith('data: ')) return;
-        var d; try { d = JSON.parse(line.slice(6)); } catch(e) { return; }
+      var lines = dec.decode(chunk.value).split('\n');
+      for (var li = 0; li < lines.length; li++) {
+        var line = lines[li];
+        if (!line.startsWith('data: ')) continue;
+        var d; try { d = JSON.parse(line.slice(6)); } catch(e) { continue; }
+        if (!d) continue;
         if (d.total_chunks) log('Processing ' + d.total_chunks + ' chunk(s)\u2026');
         if (d.chunk) {
           fullMd += d.chunk;
@@ -268,7 +270,7 @@
           pdfBtn.onclick = function() { downloadPDF(fullMd); };
         }
         if (d.error) throw new Error(d.error);
-      });
+      }
     }
   }
 
