@@ -5,7 +5,6 @@ import re
 from io import BytesIO
 
 import markdown2
-from weasyprint import HTML as WP
 
 _CSS = """
 /* Fonts are baked into the Docker image at /usr/local/share/fonts/tubescribe/
@@ -144,21 +143,31 @@ def _fix_inline_lists(md: str) -> str:
                         result.append(f'- {item}')
                 continue
 
-        # Pattern 2: inline dash list  (text - item - item)
-        # Needs at least 2 " - " occurrences to avoid false positives on ranges like "5 - 10"
-        if len(re.findall(r'\s-\s', line)) >= 2:
-            m = re.match(r'^(.*?)\s+-\s+(.+)$', line)
-            if m:
+        # Pattern 2: inline dash list after colon OR multiple inline dashes
+        # Catches: "Topics: - Recursion - Tabulation - Space Optimization"
+        # Catches: "text - item1 - item2 - item3"
+        has_colon_list = bool(re.search(r':\s+-\s+\S', line))
+        has_multi_dash = len(re.findall(r'\s-\s', line)) >= 2
+        if has_colon_list or has_multi_dash:
+            colon_pos = line.find(': -') if has_colon_list else -1
+            if colon_pos != -1:
+                prefix = line[:colon_pos + 1].rstrip()
+                rest = line[colon_pos + 2:].strip()
+            else:
+                m = re.match(r'^(.*?)\s+-\s+(.+)$', line)
+                if not m:
+                    result.append(line)
+                    continue
                 prefix = m.group(1).rstrip()
-                rest   = '- ' + m.group(2)
-                items  = re.split(r'\s+-\s+', rest)
-                if prefix:
-                    result.append(prefix)
-                for item in items:
-                    item = item.strip()
-                    if item:
-                        result.append(item if item.startswith('-') else f'- {item}')
-                continue
+                rest = '- ' + m.group(2)
+            items = re.split(r'\s+-\s+', rest)
+            if prefix:
+                result.append(prefix)
+            for item in items:
+                item = item.strip().lstrip('- ').strip()
+                if item:
+                    result.append(f'- {item}')
+            continue
 
         result.append(line)
 
@@ -183,5 +192,6 @@ def to_pdf(title: str, md_content: str, provider_label: str = "") -> bytes:
   {body}
 </body></html>"""
     buf = BytesIO()
+    from weasyprint import HTML as WP  # lazy — avoids blocking app startup
     WP(string=html).write_pdf(buf)
     return buf.getvalue()
