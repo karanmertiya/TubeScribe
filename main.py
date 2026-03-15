@@ -332,7 +332,45 @@ window._tubescribeAutostart = {{
         return JSONResponse({"error": str(exc), "trace": traceback.format_exc()}, status_code=500)
 
 
-@app.get("/debug-paths", include_in_schema=False)
+@app.post("/playlist-zip", tags=["Pipeline"], include_in_schema=False)
+async def playlist_zip(request: Request):
+    """
+    Receives a list of {title, markdown} objects, generates PDFs for each,
+    and returns them as a ZIP file.
+    """
+    import zipfile
+    import io
+    body = await request.json()
+    playlist_title = (body.get("playlist_title") or "playlist").strip()
+    videos = body.get("videos") or []
+
+    if not videos:
+        return JSONResponse({"error": "No videos provided"}, status_code=400)
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, v in enumerate(videos, 1):
+            title    = (v.get("title") or f"Video {i}").strip()
+            markdown = (v.get("markdown") or "").strip()
+            if not markdown:
+                continue
+            try:
+                pdf_bytes = to_pdf(title, markdown)
+                safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", title[:60])
+                zf.writestr(f"{i:02d}_{safe_name}.pdf", pdf_bytes)
+            except Exception as exc:
+                log.warning("PDF failed for '%s': %s", title, exc)
+
+    zip_buf.seek(0)
+    safe_playlist = re.sub(r"[^a-zA-Z0-9_-]", "_", playlist_title[:60])
+    return RawResponse(
+        content=zip_buf.read(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_playlist}.zip"'},
+    )
+
+
+
 async def debug_paths():
     import glob
     base = os.path.dirname(__file__)
