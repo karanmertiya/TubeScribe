@@ -18,7 +18,7 @@ from backend.telegram import send_document
 from backend.youtube import chunk
 
 log         = logging.getLogger("tubescribe.pipeline")
-CHUNK_WORDS = int(os.getenv("CHUNK_WORDS", "700"))
+CHUNK_WORDS = int(os.getenv("CHUNK_WORDS", "4000"))
 
 
 def _sse(event_type: str, msg: str, **extra) -> str:
@@ -172,7 +172,7 @@ async def run_single_stream(
                 notes = call_llm(llm, c)
                 yield f"data: {json.dumps({'chunk': notes, 'chunk_index': i, 'total_chunks': len(chunks)})}\n\n"
                 if len(chunks) > 1:
-                    time.sleep(2)  # avoid Groq rate limit between chunks
+                    time.sleep(1)  # avoid Groq rate limit between chunks
 
             analytics.record("video_processed", mode=mode,
                              session=_session_hash(session_id), provider=llm.provider)
