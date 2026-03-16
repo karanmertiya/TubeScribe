@@ -1,5 +1,6 @@
-"""Groq provider — OpenAI-compatible REST with exponential back-off on 429."""
+"""Groq provider — round-robins across up to 3 API keys for 3x rate limit."""
 from __future__ import annotations
+import itertools
 import logging
 import os
 import time
@@ -8,15 +9,31 @@ import requests as _requests
 
 from .config import LLMConfig
 
-log        = logging.getLogger("tubescribe.llm.groq")
-MAX_TRIES  = int(os.getenv("GROQ_MAX_RETRIES", "6"))
+log       = logging.getLogger("tubescribe.llm.groq")
+MAX_TRIES = int(os.getenv("GROQ_MAX_RETRIES", "6"))
+
+# Build key pool from env: GROQ_API_KEY (primary), GROQ_API_KEY_2, GROQ_API_KEY_3
+def _build_pool() -> list[str]:
+    keys = []
+    for var in ("GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"):
+        k = os.getenv(var, "").strip()
+        if k:
+            keys.append(k)
+    return keys or [""]
+
+_key_pool = _build_pool()
+_key_cycle = itertools.cycle(range(len(_key_pool)))
+_call_count = 0
+
+def _next_key() -> str:
+    global _call_count
+    idx = next(_key_cycle)
+    _call_count += 1
+    log.debug("Using key slot %d (call #%d)", idx, _call_count)
+    return _key_pool[idx]
 
 
 def call(llm: LLMConfig, prompt: str) -> str:
-    headers = {
-        "Content-Type":  "application/json",
-        "Authorization": f"Bearer {llm.api_key}",
-    }
     payload = {
         "model": llm.model,
         "messages": [
@@ -26,7 +43,16 @@ def call(llm: LLMConfig, prompt: str) -> str:
         "temperature": 0.3,
     }
 
+    tried_keys: set[str] = set()
+
     for attempt in range(MAX_TRIES):
+        api_key = _next_key() or llm.api_key
+        headers = {
+            "Content-Type":  "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+        tried_keys.add(api_key)
+
         try:
             r = _requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -38,15 +64,17 @@ def call(llm: LLMConfig, prompt: str) -> str:
         except _requests.HTTPError as exc:
             status = exc.response.status_code
             if status == 429:
-                # Try to read Retry-After header first, then use exponential backoff
+                # If we have untried keys, switch immediately with no wait
+                untried = [k for k in _key_pool if k and k not in tried_keys]
+                if untried:
+                    log.warning("429 on key slot — switching to next key immediately")
+                    continue
+                # All keys exhausted, back off
                 retry_after = exc.response.headers.get("Retry-After")
-                if retry_after:
-                    wait = int(retry_after) + 2
-                else:
-                    # Exponential: 20, 40, 60, 80, 100, 120
-                    wait = min(20 * (attempt + 1), 120)
-                log.warning("Rate-limit 429 — waiting %ds (attempt %d/%d)", wait, attempt + 1, MAX_TRIES)
+                wait = int(retry_after) + 2 if retry_after else min(20 * (attempt + 1), 120)
+                log.warning("All keys rate-limited — waiting %ds (attempt %d/%d)", wait, attempt + 1, MAX_TRIES)
                 time.sleep(wait)
+                tried_keys.clear()  # reset so we retry all keys after wait
                 continue
             else:
                 log.error("Groq HTTP %s: %s", status, exc.response.text[:200])
@@ -55,8 +83,8 @@ def call(llm: LLMConfig, prompt: str) -> str:
         except Exception as exc:
             log.error("Groq error: %s", exc)
             if attempt < MAX_TRIES - 1:
-                time.sleep(10)
+                time.sleep(5)
                 continue
             return f"\n\n> \u26a0\ufe0f **Groq Error:** {exc}\n\n"
 
-    return f"\n\n> \u274c **Groq failed after {MAX_TRIES} retries. Try again in a minute.**\n\n"
+    return f"\n\n> \u274c **Groq failed after {MAX_TRIES} retries.**\n\n"
