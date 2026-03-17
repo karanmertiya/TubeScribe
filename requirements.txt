@@ -13,3 +13,4 @@ pypdf>=4.2.0
 rich>=13.7.1
 youtube-transcript-api>=1.0.0
 PySocks>=1.7.1
+httpx
