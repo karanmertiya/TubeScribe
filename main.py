@@ -128,6 +128,25 @@ def health():
     }
 
 
+async def _keep_alive():
+    """Ping self every 10 minutes to prevent Railway sleeping."""
+    import httpx, asyncio
+    await asyncio.sleep(60)
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.get("https://tube-scribe.up.railway.app/health", timeout=10)
+        except Exception:
+            pass
+        await asyncio.sleep(600)
+
+
+@app.on_event("startup")
+async def startup():
+    import asyncio
+    asyncio.create_task(_keep_alive())
+
+
 @app.get("/stats", tags=["System"])
 def stats():
     """Public stats — safe to embed in README badge."""
